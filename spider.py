@@ -3,6 +3,8 @@ from bs4 import BeautifulSoup
 import re
 import os
 from PIL import Image
+import sys
+import argparse
 
 PATTERN = re.compile(r'stickershop/v1/sticker/(\d+)/\w+/sticker.png')
 url = 'https://store.line.me/stickershop/product/1478946/en?from=sticker'
@@ -44,9 +46,15 @@ def download_file(url, path):
 
 
 def main():
+    arg_parser = argparse.ArgumentParser()
+    arg_parser.add_argument('id', type=int, help='Product id of sticker set')
+    arg_parser.add_argument('--proxy', type=str, help='HTTPS proxy, addr:port')
+    arg_parser.add_argument('--scale', type=bool, help='Scale the image size to fit telegram stickers')
+    args = arg_parser.parse_args()
     r = requests.get(url, proxies=proxies)
     title, id_list = parse_page(r.content)
     title = title.replace(':', ' ')
+    # remove invalid characters in folder name
     if not os.path.isdir(title):
         os.mkdir(title)
     for _id in id_list:
