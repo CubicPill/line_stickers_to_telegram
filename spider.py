@@ -46,11 +46,20 @@ def download_file(url, path):
 
 
 def main():
-    arg_parser = argparse.ArgumentParser()
+    scale = True
+    arg_parser = argparse.ArgumentParser(description='Download stickers from line store')
     arg_parser.add_argument('id', type=int, help='Product id of sticker set')
     arg_parser.add_argument('--proxy', type=str, help='HTTPS proxy, addr:port')
-    arg_parser.add_argument('--scale', type=bool, help='Scale the image size to fit telegram stickers')
+    arg_parser.add_argument('--noscale', help='Scale the image size to fit telegram stickers', action='store_false')
+    arg_parser.add_argument('-p', '--path', type=str, help='Path to download the stickers')
     args = arg_parser.parse_args()
+    if args.proxy:
+        global proxies
+        proxies = {'http': args.proxy}
+    if args.noscale is False:
+        scale = False
+    root_path = args.path or '.'
+
     r = requests.get(url, proxies=proxies)
     title, id_list = parse_page(r.content)
     title = title.replace(':', ' ')
@@ -59,9 +68,10 @@ def main():
         os.mkdir(title)
     for _id in id_list:
         print('downloading {}'.format(_id))
-        path = './{fd}/{fn}.png'.format(fd=title, fn=_id)
+        path = root_path + '/{fd}/{fn}.png'.format(fd=title, fn=_id)
         download_file(URL_TEMPLATE.format(id=_id), path)
-        scale_image(path)
+        if scale:
+            scale_image(path)
 
 
 if __name__ == '__main__':
