@@ -9,6 +9,7 @@ import argparse
 import time
 from tqdm import tqdm
 
+# TODO: Download sounds, convert APNG to GIF / Video(with sounds)
 PATTERN = re.compile(r'stickershop/v1/sticker/(\d+)/\w+/sticker.png')
 STATIC_STICKER = 'static'
 ANIMATED_STICKER = 'animated'
@@ -16,11 +17,14 @@ ANIMATED_AND_SOUND_STICKER = 'animated&sound'
 POPUP_STICKER = 'popup'
 POPUP_AND_SOUND_STICKER = 'popup&sound'
 SOUND_ONLY_STICKER = 'sound_only'
-
+SOUND = 'sound'
 SET_URL_TEMPLATE = 'https://store.line.me/stickershop/product/{id}/en?from=sticker'
 STICKER_URL_TEMPLATES = {
+    SOUND: 'https://stickershop.line-scdn.net/stickershop/v1/sticker/{id}/IOS/sticker_sound.m4a',
     STATIC_STICKER: 'https://stickershop.line-scdn.net/stickershop/v1/sticker/{id}/android/sticker@2x.png',
+    SOUND_ONLY_STICKER: 'https://stickershop.line-scdn.net/stickershop/v1/sticker/{id}/android/sticker@2x.png',
     ANIMATED_STICKER: 'https://stickershop.line-scdn.net/stickershop/v1/sticker/{id}/IOS/sticker_animation@2x.png',
+    ANIMATED_AND_SOUND_STICKER: 'https://stickershop.line-scdn.net/stickershop/v1/sticker/{id}/IOS/sticker_animation@2x.png',
     POPUP_STICKER: 'https://stickershop.line-scdn.net/stickershop/v1/sticker/{id}/IOS/sticker_popup@2x.png',
     POPUP_AND_SOUND_STICKER: 'https://stickershop.line-scdn.net/stickershop/v1/sticker/{id}/IOS/sticker_popup@2x.png'
 }
