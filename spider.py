@@ -9,7 +9,7 @@ import argparse
 PATTERN = re.compile(r'stickershop/v1/sticker/(\d+)/\w+/sticker.png')
 url = 'https://store.line.me/stickershop/product/1478946/en?from=sticker'
 URL_TEMPLATE = 'https://stickershop.line-scdn.net/stickershop/v1/sticker/{id}/android/sticker.png'
-proxies = {'https': '127.0.0.1:1080'}
+proxies = {}
 
 
 def parse_page(content: bytes):
@@ -50,25 +50,29 @@ def main():
     arg_parser = argparse.ArgumentParser(description='Download stickers from line store')
     arg_parser.add_argument('id', type=int, help='Product id of sticker set')
     arg_parser.add_argument('--proxy', type=str, help='HTTPS proxy, addr:port')
-    arg_parser.add_argument('--noscale', help='Scale the image size to fit telegram stickers', action='store_false')
+    arg_parser.add_argument('--noscale', help='Disable auto resize to 512*512', action='store_false')
     arg_parser.add_argument('-p', '--path', type=str, help='Path to download the stickers')
+
+    arg_parser.add_argument('-t', '--threads', type=int, help='Thread number of downloader, default 4')
     args = arg_parser.parse_args()
     if args.proxy:
         global proxies
         proxies = {'http': args.proxy}
     if args.noscale is False:
         scale = False
-    root_path = args.path or '.'
 
     r = requests.get(url, proxies=proxies)
     title, id_list = parse_page(r.content)
     title = title.replace(':', ' ')
     # remove invalid characters in folder name
-    if not os.path.isdir(title):
-        os.mkdir(title)
+    if args.path:
+        path = args.path
+    else:
+        path = title
+    if not os.path.isdir(path):
+        os.mkdir(path)
     for _id in id_list:
-        print('downloading {}'.format(_id))
-        path = root_path + '/{fd}/{fn}.png'.format(fd=title, fn=_id)
+        path = path + '/{fn}.png'.format(fn=_id)
         download_file(URL_TEMPLATE.format(id=_id), path)
         if scale:
             scale_image(path)
