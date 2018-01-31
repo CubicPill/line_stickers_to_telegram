@@ -3,12 +3,15 @@ from bs4 import BeautifulSoup
 import re
 import os
 from PIL import Image
-import sys
+from queue import Queue
+from threading import Thread
 import argparse
+import time
+from tqdm import tqdm
 
 PATTERN = re.compile(r'stickershop/v1/sticker/(\d+)/\w+/sticker.png')
-url = 'https://store.line.me/stickershop/product/1478946/en?from=sticker'
-URL_TEMPLATE = 'https://stickershop.line-scdn.net/stickershop/v1/sticker/{id}/android/sticker.png'
+SET_URL_TEMPLATE = 'https://store.line.me/stickershop/product/{id}/en?from=sticker'
+STICKER_URL_TEMPLATE = 'https://stickershop.line-scdn.net/stickershop/v1/sticker/{id}/android/sticker.png'
 proxies = {}
 
 
@@ -37,12 +40,31 @@ def scale_image(path):
     img.resize((w_s, h_s), Image.ANTIALIAS).save(path)
 
 
-def download_file(url, path):
+def download_file(url, filename):
     r = requests.get(url, stream=True, proxies=proxies)
-    with open(path, 'wb') as f:
+    with open(filename, 'wb') as f:
         for chunk in r.iter_content(chunk_size=1024):
             if chunk:
                 f.write(chunk)
+
+
+class Downloader(Thread):
+    def __init__(self, queue: Queue):
+        Thread.__init__(self)
+        self.queue = queue
+
+    def run(self):
+        while not self.queue.empty():
+            (url, path, scale) = self.queue.get()
+            try:
+                download_file(url, path)
+                if scale:
+                    scale_image(path)
+            except requests.RequestException as e:
+                print(e)
+                self.queue.put((url, path, scale))
+            finally:
+                self.queue.task_done()
 
 
 def main():
@@ -57,13 +79,16 @@ def main():
     args = arg_parser.parse_args()
     if args.proxy:
         global proxies
-        proxies = {'http': args.proxy}
+        proxies = {'https': args.proxy}
     if args.noscale is False:
         scale = False
-
-    r = requests.get(url, proxies=proxies)
+    if args.threads:
+        thread_num = args.threads
+    else:
+        thread_num = 4
+    r = requests.get(SET_URL_TEMPLATE.format(id=args.id), proxies=proxies)
     title, id_list = parse_page(r.content)
-    title = title.replace(':', ' ')
+    title = '_'.join(re.sub(r'[/:*?"<>|]', '', title).split())
     # remove invalid characters in folder name
     if args.path:
         path = args.path
@@ -71,11 +96,23 @@ def main():
         path = title
     if not os.path.isdir(path):
         os.mkdir(path)
+    queue = Queue()
+    downloader = [Downloader(queue) for i in range(thread_num)]
+
     for _id in id_list:
-        path = path + '/{fn}.png'.format(fn=_id)
-        download_file(URL_TEMPLATE.format(id=_id), path)
-        if scale:
-            scale_image(path)
+        filename = path + '/{fn}.png'.format(fn=_id)
+        url = STICKER_URL_TEMPLATE.format(id=_id)
+        queue.put((url, filename, scale))
+    for d in downloader:
+        d.start()
+    with tqdm(total=len(id_list)) as bar:
+        last = len(id_list)
+        while not queue.empty():
+            bar.update(last - queue.qsize())
+            last = queue.qsize()
+            time.sleep(0.1)
+        bar.clear()
+    print('All done!')
 
 
 if __name__ == '__main__':
