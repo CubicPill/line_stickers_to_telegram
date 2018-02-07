@@ -134,6 +134,11 @@ def main():
         filename = path + '/{fn}_{t}.png'.format(fn=_id, t=sticker_type)
         url = STICKER_URL_TEMPLATES[sticker_type].format(id=_id)
         queue.put((url, filename, scale, sticker_type))
+        if sticker_type in [SOUND_ONLY_STICKER, ANIMATED_AND_SOUND_STICKER, POPUP_AND_SOUND_STICKER]:
+            filename = path + '/{fn}.m4a'.format(fn=_id)
+            url = STICKER_URL_TEMPLATES[SOUND].format(id=_id)
+            queue.put((url, filename, scale, sticker_type))
+
     for d in downloader:
         d.start()
     with tqdm(total=len(id_list)) as bar:
