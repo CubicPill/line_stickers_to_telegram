@@ -1,12 +1,13 @@
-import requests
-from bs4 import BeautifulSoup
-import re
+import argparse
 import os
-from PIL import Image
+import re
+import time
 from queue import Queue
 from threading import Thread
-import argparse
-import time
+
+import requests
+from PIL import Image
+from bs4 import BeautifulSoup
 from tqdm import tqdm
 
 # TODO: Download sounds, convert APNG to GIF / Video(with sounds)
@@ -60,6 +61,7 @@ def parse_page(content: bytes):
 
 
 def scale_image(path):
+    # TODO: handle this with ffmpeg?
     img = Image.open(path)
     w, h = img.size
     if max([w, h]) == 512:
@@ -94,6 +96,11 @@ class Downloader(Thread):
                 self.queue.put((url, path, scale, sticker_type))
             finally:
                 self.queue.task_done()
+
+
+class ImageProcessorThread(Thread):
+    # TODO: conversion
+    pass
 
 
 def main():
