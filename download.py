@@ -43,6 +43,7 @@ def main():
         path = title
     if not os.path.isdir(path):
         os.mkdir(path)
+    os.mkdir(path + os.path.sep + 'tmp')
 
     option = ProcessOption.SCALE
     if args.to_video:
@@ -54,7 +55,7 @@ def main():
     download_queue = Queue()
     process_queue = Queue()
     downloader = [DownloadThread(download_queue) for _ in range(thread_num)]
-    processor = [ImageProcessorThread(process_queue,option) for _ in range(4)]
+
     for _id in id_list:
         filename = path + '/{fn}_{t}.png'.format(fn=_id, t=sticker_type)
         url = STICKER_URL_TEMPLATES[sticker_type].format(id=_id)
@@ -67,6 +68,9 @@ def main():
 
     for d in downloader:
         d.start()
+    if option == ProcessOption.NONE:
+        pass
+    processor = [ImageProcessorThread(process_queue, option) for _ in range(4)]
     with tqdm(total=len(id_list)) as bar:
         last = len(id_list)
         while not download_queue.empty():

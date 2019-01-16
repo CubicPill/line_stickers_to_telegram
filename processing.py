@@ -43,7 +43,14 @@ def scale_image(in_file, out_file):
 
 
 def to_gif(in_file, out_file):
-    pass
+    input_stream = ffmpeg.input(in_file, f='apng')
+    input_stream \
+        .filter('pad', w='iw*2', h='ih', x='iw', y='ih', color='white') \
+        .crop(width='iw/2', height='ih', x=0, y=0) \
+        .overlay(input_stream, format='rgb') \
+        .output(out_file, f='gif') \
+        .overwrite_output() \
+        .run()
 
 
 def to_video(in_pic, in_audio, out_file):
