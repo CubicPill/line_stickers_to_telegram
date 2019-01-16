@@ -1,34 +1,32 @@
-from queue import Queue
 from threading import Thread
 
 import requests
 
-from download import proxies
 from utils import FAKE_HEADERS
 
 
-# TODO: convert APNG to GIF / Video(with sounds)
-
-def download_file(url, filename):
-    print(url)
+def download_file(url, filename, proxies):
     r = requests.get(url, proxies=proxies, headers=FAKE_HEADERS)
     with open(filename, 'wb') as f:
         f.write(r.content)
 
 
 class DownloadThread(Thread):
-    def __init__(self, queue: Queue):
-        Thread.__init__(self,name='DownloadThread')
+    def __init__(self, queue, out_queue, proxies=None):
+        Thread.__init__(self, name='DownloadThread')
         self.queue = queue
+        self.out_queue = out_queue
+        self.proxies = proxies
 
     def run(self):
         while not self.queue.empty():
-            (url, path, sticker_type) = self.queue.get()
+            id, url, path = self.queue.get()
             try:
-                download_file(url, path)
+                download_file(url, path, self.proxies)
             except requests.RequestException:
-                self.queue.put((url, path, sticker_type))
+                self.queue.put((url, path))
+
+            else:
+                self.out_queue.put(id)
             finally:
                 self.queue.task_done()
-
-
