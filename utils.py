@@ -1,7 +1,6 @@
 import re
 from enum import Enum
 
-from PIL import Image
 from bs4 import BeautifulSoup
 
 SINGLE_STICKER_ID_PATTERN = re.compile(r'stickershop/v1/sticker/(\d+)/\w+/sticker.png')
@@ -58,14 +57,3 @@ def parse_page(content: bytes):
     return title, id_list, sticker_type
 
 
-def scale_image(path):
-    # TODO: handle this with ffmpeg?
-    img = Image.open(path)
-    w, h = img.size
-    if max([w, h]) == 512:
-        return
-    if w > h:
-        w_s, h_s = 512, int(h / w * 512)
-    else:
-        w_s, h_s = int(w / h * 512), 512
-    img.resize((w_s, h_s), Image.ANTIALIAS).save(path)
