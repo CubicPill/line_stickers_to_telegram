@@ -47,7 +47,12 @@ def parse_page(content: bytes):
     elif soup.find('span', {'class': 'MdIcoSound_b'}):
         sticker_type = StickerType.STATIC_WITH_SOUND_STICKER
 
-    title = soup.find('h3', {'class': 'mdCMN08Ttl'}).text
+    title = soup.find('h3', {'class': 'mdCMN08Ttl'})
+    if title:
+        title = title.text
+    else:
+        print('Error: Cannot parse page')
+        exit(1)
     id_list = list()
     for sticker in sticker_list:
         match = SINGLE_STICKER_ID_PATTERN.search(sticker['style'])
@@ -55,5 +60,3 @@ def parse_page(content: bytes):
             id_list.append(match.group(1))
 
     return title, id_list, sticker_type
-
-

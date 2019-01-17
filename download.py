@@ -41,6 +41,8 @@ def main():
         sticker_type = StickerType.STATIC_STICKER
     title = '_'.join(re.sub(r'[/:*?"<>|]', '', title).split())
     print('Title:', title)
+    print('Sticker Type:', sticker_type.name)
+    print('Total number of stickers:', len(id_list))
     # remove invalid characters in folder name
     if args.path:
         path = args.path
@@ -50,7 +52,7 @@ def main():
         os.mkdir(path)
     if not os.path.isdir(path + os.path.sep + 'tmp'):
         os.mkdir(path + os.path.sep + 'tmp')
-
+    print('Downloading to:', path)
     option = ProcessOption.SCALE
     if args.to_video:
         option = ProcessOption.TO_VIDEO
@@ -93,6 +95,7 @@ def main():
     print('Download done!')
 
     if option != ProcessOption.NONE:
+        print('Processing:', option.name)
         process_queue = Queue()
         while not download_completed_queue.empty():
             _id = download_completed_queue.get_nowait()
