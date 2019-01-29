@@ -1,5 +1,3 @@
-import os
-import subprocess
 from enum import Enum
 from threading import Thread
 
@@ -45,26 +43,15 @@ class ImageProcessorThread(Thread):
 
     def to_gif(self, in_file, out_file):
         input_stream = ffmpeg.input(in_file, f='apng')
-        temp_apng_filename = self.temp_dir + os.path.sep + 'temp_' + in_file.split(os.path.sep)[-1]
-        temp_palette_filename = self.temp_dir + os.path.sep + 'temp_palette_' + in_file.split(os.path.sep)[-1]
-        input_stream \
+        in1 = input_stream \
             .filter('pad', w='iw*2', h='ih', x='iw', y='ih', color='white') \
             .crop(width='iw/2', height='ih', x=0, y=0) \
-            .overlay(input_stream) \
-            .output(temp_apng_filename, f='apng', plays=0) \
+            .overlay(input_stream)
+        in2 = input_stream.filter('palettegen')
+        ffmpeg.filter([in1, in2], 'paletteuse') \
+            .output(out_file) \
             .overwrite_output() \
             .run(quiet=True)
-        input_stream.filter('palettegen').output(temp_palette_filename) \
-            .overwrite_output() \
-            .run(quiet=True)
-        ffmpeg.input(temp_apng_filename).output(out_file, f='gif') \
-            .overwrite_output() \
-            .run(quiet=True)
-        # currently I have no idea how to do this in ffmpeg-python
-        proc = subprocess.Popen(
-            ['ffmpeg', '-i', temp_apng_filename, '-i', temp_palette_filename, '-lavfi', 'paletteuse', '-y', out_file],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        outs, errs = proc.communicate()
 
     def to_video(self, in_pic, in_audio, out_file):
         # TODO: Complete this
