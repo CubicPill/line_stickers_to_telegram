@@ -1,9 +1,4 @@
-import re
 from enum import Enum
-
-from bs4 import BeautifulSoup
-
-SINGLE_STICKER_ID_PATTERN = re.compile(r'stickershop/v1/sticker/(\d+)/\w+/sticker.png')
 
 
 class StickerType(Enum):
@@ -16,7 +11,15 @@ class StickerType(Enum):
     SOUND = 'sound'
 
 
-SET_URL_TEMPLATE = 'https://store.line.me/stickershop/product/{id}/en?from=sticker'
+class StickerSetSource(Enum):
+    LINE = 'line',
+    YABE = 'yabe'
+
+
+SET_URL_TEMPLATES = {
+    StickerSetSource.LINE: 'https://store.line.me/stickershop/product/{id}/en?from=sticker',
+    StickerSetSource.YABE: 'https://yabeline.tw/Stickers_Data.php?Number={id}'
+}
 
 STICKER_URL_TEMPLATES = {
     StickerType.SOUND: 'https://stickershop.line-scdn.net/stickershop/v1/sticker/{id}/IOS/sticker_sound.m4a',
@@ -30,33 +33,3 @@ STICKER_URL_TEMPLATES = {
 FAKE_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.132 Safari/537.36'
 }
-
-
-def parse_page(content: bytes):
-    sticker_type = StickerType.STATIC_STICKER
-    soup = BeautifulSoup(content, 'html5lib')
-    sticker_list = soup.find_all('span', {'class': 'mdCMN09Image'})
-    if soup.find('span', {'class': 'MdIcoFlash_b'}):
-        sticker_type = StickerType.POPUP_STICKER
-    elif soup.find('span', {'class': 'MdIcoFlashAni_b'}):
-        sticker_type = StickerType.POPUP_AND_SOUND_STICKER
-    elif soup.find('span', {'class': 'MdIcoPlay_b'}):
-        sticker_type = StickerType.ANIMATED_STICKER
-    elif soup.find('span', {'class': 'MdIcoFlash_b'}):
-        sticker_type = StickerType.ANIMATED_AND_SOUND_STICKER
-    elif soup.find('span', {'class': 'MdIcoSound_b'}):
-        sticker_type = StickerType.STATIC_WITH_SOUND_STICKER
-
-    title = soup.find('h3', {'class': 'mdCMN08Ttl'})
-    if title:
-        title = title.text
-    else:
-        print('Error: Cannot parse page')
-        exit(1)
-    id_list = list()
-    for sticker in sticker_list:
-        match = SINGLE_STICKER_ID_PATTERN.search(sticker['style'])
-        if match:
-            id_list.append(match.group(1))
-
-    return title, id_list, sticker_type

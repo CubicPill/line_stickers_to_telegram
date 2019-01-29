@@ -8,9 +8,10 @@ from queue import Queue
 import requests
 from tqdm import tqdm
 
+from parse import parse_page
 from processing import ImageProcessorThread, ProcessOption
 from spider import DownloadThread
-from utils import SET_URL_TEMPLATE, parse_page, StickerType, STICKER_URL_TEMPLATES
+from utils import SET_URL_TEMPLATES, STICKER_URL_TEMPLATES, StickerType, StickerSetSource
 
 
 # TODO: convert APNG to Video(with sounds)
@@ -19,6 +20,7 @@ from utils import SET_URL_TEMPLATE, parse_page, StickerType, STICKER_URL_TEMPLAT
 def main():
     arg_parser = argparse.ArgumentParser(description='Download stickers from line store')
     arg_parser.add_argument('id', type=int, help='Product id of sticker set')
+    arg_parser.add_argument('--source', type=str, help='Source to get sticker set information. Default is "line"')
     arg_parser.add_argument('--proxy', type=str, help='HTTPS proxy, addr:port')
     arg_parser.add_argument('--no-scale', help='Disable static stickers auto resizing to 512*512', action='store_false')
     arg_parser.add_argument('--static',
@@ -35,8 +37,12 @@ def main():
     if args.proxy:
         proxies['https'] = args.proxy
     thread_num = args.threads or 4
-    r = requests.get(SET_URL_TEMPLATE.format(id=args.id), proxies=proxies)
-    title, id_list, sticker_type = parse_page(r.content)
+    source = StickerSetSource.LINE
+    if args.source == 'yabe':
+        source = StickerSetSource.YABE
+
+    r = requests.get(SET_URL_TEMPLATES[source].format(id=args.id), proxies=proxies)
+    title, id_list, sticker_type = parse_page(r.content, source)
     if args.static:
         sticker_type = StickerType.STATIC_STICKER
     title = '_'.join(re.sub(r'[/:*?"<>|]', '', title).split())
