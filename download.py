@@ -14,9 +14,6 @@ from spider import DownloadThread
 from utils import SET_URL_TEMPLATES, STICKER_URL_TEMPLATES, StickerType, StickerSetSource
 
 
-# TODO: convert APNG to Video(with sounds)
-
-
 def main():
     arg_parser = argparse.ArgumentParser(description='Download stickers from line store')
     arg_parser.add_argument('id', type=int, help='Product id of sticker set')
@@ -84,13 +81,20 @@ def main():
                 and option == ProcessOption.TO_VIDEO:
             filename = os.path.sep.join([path, 'tmp', '{fn}.m4a'.format(fn=_id)])
             url = STICKER_URL_TEMPLATES[StickerType.SOUND].format(id=_id)
-            download_queue.put(('{}|Audio'.format(id), url, filename))
+            download_queue.put(('{}|Audio'.format(_id), url, filename))
 
     for d in downloader:
         d.start()
+    if sticker_type in [StickerType.STATIC_WITH_SOUND_STICKER,
+                        StickerType.ANIMATED_AND_SOUND_STICKER,
+                        StickerType.POPUP_AND_SOUND_STICKER] \
+            and option == ProcessOption.TO_VIDEO:
 
-    with tqdm(total=len(id_list)) as bar:
-        last = len(id_list)
+        total_count = len(id_list) * 2
+    else:
+        total_count = len(id_list)
+    with tqdm(total=total_count) as bar:
+        last = total_count
         while not download_queue.empty():
             bar.update(last - download_queue.qsize())
             last = download_queue.qsize()
@@ -106,11 +110,15 @@ def main():
         while not download_completed_queue.empty():
             _id = download_completed_queue.get_nowait()
             if 'Audio' in _id:
-                pass
+                continue
             if option == ProcessOption.TO_VIDEO:
-                pass
-            # Here we need to ensure both audio and picture are ready
-            # TODO: above
+                in_pic = os.path.sep.join([path, 'tmp', '{fn}_{t}.png'.format(fn=_id, t=sticker_type)])
+                in_audio = os.path.sep.join([path, 'tmp', '{fn}.m4a'.format(fn=_id)])
+                if not os.path.isfile(in_audio):
+                    in_audio = None
+                out_file = os.path.sep.join([path, '{fn}.mp4'.format(fn=_id)])
+                process_queue.put_nowait((in_pic, in_audio, out_file))
+
             else:
                 in_file = os.path.sep.join([path, 'tmp', '{fn}_{t}.png'.format(fn=_id, t=sticker_type)])
                 out_file = os.path.sep.join([path, '{fn}.gif'.format(fn=_id)])
@@ -118,8 +126,8 @@ def main():
         processor = [ImageProcessorThread(process_queue, option, path + os.path.sep + 'tmp') for _ in range(4)]
         for p in processor:
             p.start()
-        with tqdm(total=len(id_list)) as bar:
-            last = len(id_list)
+        with tqdm(total=total_count) as bar:
+            last = total_count
             while not download_queue.empty() or not process_queue.empty():
                 bar.update(last - max(download_queue.qsize(), process_queue.qsize()))
                 last = max(download_queue.qsize(), process_queue.qsize())

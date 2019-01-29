@@ -20,13 +20,13 @@ class DownloadThread(Thread):
 
     def run(self):
         while not self.queue.empty():
-            id, url, path = self.queue.get()
+            _id, url, path = self.queue.get()
             try:
                 download_file(url, path, self.proxies)
             except requests.RequestException:
-                self.queue.put((id, url, path))
+                self.queue.put((_id, url, path))
 
             else:
-                self.out_queue.put(id)
+                self.out_queue.put(_id)
             finally:
                 self.queue.task_done()

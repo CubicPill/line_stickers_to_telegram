@@ -59,14 +59,22 @@ class ImageProcessorThread(Thread):
             .run(quiet=True)
 
     def to_video(self, in_pic, in_audio, out_file):
-        # TODO: Complete this
-        input_stream = ffmpeg.input(in_pic, f='apng')
+        streams = list()
+        video_output = ffmpeg.input(in_pic, f='apng') \
+            .filter('geq',  # overlay transparent png on white background
+                    r='(r(X,Y)*alpha(X,Y)/255)+(255-alpha(X,Y))',
+                    g='(g(X,Y)*alpha(X,Y)/255)+(255-alpha(X,Y))',
+                    b='(b(X,Y)*alpha(X,Y)/255)+(255-alpha(X,Y))',
+                    a=255
+                    ) \
+            .filter('scale',
+                    w='trunc(iw/2)*2',
+                    h='trunc(ih/2)*2'  # enable H.264
+                    )
+
+        streams.append(video_output)
         if in_audio:
-            pass
-        input_stream \
-            .filter('pad', w='iw*2', h='ih', x='iw', y='ih', color='white') \
-            .crop(width='iw/2', height='ih', x=0, y=0) \
-            .overlay(input_stream, format='rgb') \
-            .output(out_file, f='mp4') \
-            .overwrite_output() \
-            .run(quite=True)
+            audio_input = ffmpeg.input(in_audio)
+            streams.append(audio_input)
+        ffmpeg.output(*streams, out_file, pix_fmt='yuv420p', movflags='faststart') \
+            .overwrite_output().run(quiet=True)
