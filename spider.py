@@ -24,7 +24,7 @@ class DownloadThread(Thread):
             try:
                 download_file(url, path, self.proxies)
             except requests.RequestException:
-                self.queue.put((url, path))
+                self.queue.put((id, url, path))
 
             else:
                 self.out_queue.put(id)
