@@ -1,4 +1,3 @@
-import os
 from enum import Enum
 from threading import Thread
 
@@ -45,17 +44,14 @@ class ImageProcessorThread(Thread):
         ffmpeg.input(in_file).filter('scale', w='if(gt(iw,ih),512,-1)', h='if(gt(iw,ih),-1,512)').output(out_file)
 
     def to_gif(self, in_file, out_file):
-        temp_apng_filename = self.temp_dir + os.path.sep + 'temp_' + in_file.split(os.path.sep)[-1]
         input_stream = ffmpeg.input(in_file, f='apng')
-        input_stream.filter('geq',
-                            r='(r(X,Y)*alpha(X,Y)/255)+(255-alpha(X,Y))',
-                            g='(g(X,Y)*alpha(X,Y)/255)+(255-alpha(X,Y))',
-                            b='(b(X,Y)*alpha(X,Y)/255)+(255-alpha(X,Y))',
-                            a=255) \
-            .output(temp_apng_filename, f='apng') \
-            .overwrite_output() \
-            .run(quiet=True)
-        in1 = ffmpeg.input(temp_apng_filename)
+        # overlay transparent png on white background
+        in1 = input_stream.filter('geq',
+                                  r='(r(X,Y)*alpha(X,Y)/255)+(255-alpha(X,Y))',
+                                  g='(g(X,Y)*alpha(X,Y)/255)+(255-alpha(X,Y))',
+                                  b='(b(X,Y)*alpha(X,Y)/255)+(255-alpha(X,Y))',
+                                  a=255)
+
         in2 = input_stream.filter('palettegen')
         ffmpeg.filter([in1, in2], 'paletteuse') \
             .output(out_file) \
