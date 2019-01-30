@@ -35,4 +35,21 @@ Optional arguments:
   -t THREADS, --threads THREADS
                         Thread number of downloader, default 4
 ```
+Example:
+
+```
+python .\download.py --to-gif --source yabe --proxy 127.0.0.1:1080 6533
+```
+will download sticker set [白白日記 · 好熱啊!](https://yabeline.tw/Stickers_Data.php?Number=6533) from `yabe` source, and convert them to GIF. `127.0.0.1:1080` will be used as proxy.
+
+## Implementation Details
+
+This project uses [`ffmpeg`](https://www.ffmpeg.org/) to process images/videos. [`ffmpeg-python`](https://github.com/kkroening/ffmpeg-python) is used as python bindings for `ffmmpeg`.    
+
+The original APNG images comes with Alpha channel and typically has a transparent background. To generate GIF from APNG, the GIF file must have white background (Or there will be frame overlaps). To do this, there are two solutions:
+
+1. Overlay the APNG image on a white background
+2. Calculate the color of each pixel, using white as background color.
+
+Method 1 is ~2.5x faster than method 2. But it cannot handle cases with `ya8` pixel format (Comes with Gray and Alpha channels, as I observed). So if the pixel format is `ya8`, method 2 will be used.
 
