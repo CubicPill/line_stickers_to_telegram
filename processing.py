@@ -43,14 +43,45 @@ class ImageProcessorThread(Thread):
     def scale_image(self, in_file, out_file):
         ffmpeg.input(in_file).filter('scale', w='if(gt(iw,ih),512,-1)', h='if(gt(iw,ih),-1,512)').output(out_file)
 
+    def remove_alpha_geq(self, in_stream):
+        """
+        use geq filter to remove alpha
+        just calculate the new color for each pixel on a white background
+        slower than overlay method
+        cannot handle pal8
+        :param in_stream:
+        :return:
+        """
+        return in_stream \
+            .filter('geq',
+                    r='(r(X,Y)*alpha(X,Y)/255)+(255-alpha(X,Y))',
+                    g='(g(X,Y)*alpha(X,Y)/255)+(255-alpha(X,Y))',
+                    b='(b(X,Y)*alpha(X,Y)/255)+(255-alpha(X,Y))',
+                    a=255)
+
+    def remove_alpha_overlay(self, in_stream):
+        """
+        overlay image on a white background
+        faster than geq filter
+        cannot handle ya8
+        :param in_stream:
+        :return:
+        """
+        return in_stream \
+            .filter('pad', w='iw*2', h='ih', x='iw', y='ih', color='white') \
+            .crop(width='iw/2', height='ih', x=0, y=0) \
+            .overlay(in_stream)
+
+    def remove_alpha(self, in_stream, pix_fmt):
+        if pix_fmt == 'ya8':  # use geq method
+            return self.remove_alpha_geq(in_stream)
+        else:
+            return self.remove_alpha_overlay(in_stream)
+
     def to_gif(self, in_file, out_file):
+        pix_fmt = ffmpeg.probe(in_file)['streams'][0]['pix_fmt']
         input_stream = ffmpeg.input(in_file, f='apng')
-        # overlay transparent png on white background
-        in1 = input_stream.filter('geq',
-                                  r='(r(X,Y)*alpha(X,Y)/255)+(255-alpha(X,Y))',
-                                  g='(g(X,Y)*alpha(X,Y)/255)+(255-alpha(X,Y))',
-                                  b='(b(X,Y)*alpha(X,Y)/255)+(255-alpha(X,Y))',
-                                  a=255)
+        in1 = self.remove_alpha(input_stream, pix_fmt)
 
         in2 = input_stream.filter('palettegen')
         ffmpeg.filter([in1, in2], 'paletteuse') \
@@ -60,13 +91,9 @@ class ImageProcessorThread(Thread):
 
     def to_video(self, in_pic, in_audio, out_file):
         streams = list()
-        video_output = ffmpeg.input(in_pic, f='apng') \
-            .filter('geq',  # overlay transparent png on white background
-                    r='(r(X,Y)*alpha(X,Y)/255)+(255-alpha(X,Y))',
-                    g='(g(X,Y)*alpha(X,Y)/255)+(255-alpha(X,Y))',
-                    b='(b(X,Y)*alpha(X,Y)/255)+(255-alpha(X,Y))',
-                    a=255
-                    ) \
+        pix_fmt = ffmpeg.probe(in_pic)['streams'][0]['pix_fmt']
+        in_pic_stream = ffmpeg.input(in_pic, f='apng')
+        video_output = self.remove_alpha(in_pic_stream, pix_fmt) \
             .filter('scale',
                     w='trunc(iw/2)*2',
                     h='trunc(ih/2)*2'  # enable H.264
