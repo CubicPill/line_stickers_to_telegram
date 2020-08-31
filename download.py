@@ -18,6 +18,8 @@ def main():
     arg_parser = argparse.ArgumentParser(description='Download stickers from line store')
     arg_parser.add_argument('id', type=int, help='Product id of sticker set')
     arg_parser.add_argument('--source', type=str, help='Source to get sticker set information. Default is "line"')
+    arg_parser.add_argument('--lang', type=str,
+                            help='Language(Zone) to get sticker. Could be "en", "ja", "zh-Hant" and others. Default is "en"')
     arg_parser.add_argument('--proxy', type=str, help='HTTPS proxy, addr:port')
     arg_parser.add_argument('--no-scale', help='Disable static stickers auto resizing to 512*512', action='store_false')
     arg_parser.add_argument('--static',
@@ -37,8 +39,10 @@ def main():
     source = StickerSetSource.LINE
     if args.source == 'yabe':
         source = StickerSetSource.YABE
-
-    r = requests.get(SET_URL_TEMPLATES[source].format(id=args.id), proxies=proxies)
+    lang = 'en'
+    if args.lang:
+        lang = args.lang
+    r = requests.get(SET_URL_TEMPLATES[source].format(id=args.id, lang=lang), proxies=proxies)
     title, id_list, sticker_type = parse_page(r.content, source)
     if args.static:
         sticker_type = StickerType.STATIC_STICKER
@@ -69,7 +73,7 @@ def main():
     for _id in id_list:
         if option == ProcessOption.NONE:
 
-            filename = os.path.sep.join([path, '{fn}_{t}.png'.format(fn=_id, t=sticker_type)])
+            filename = os.path.sep.join([path, '{fn}_{t}.png'.format(fn=_id, t=sticker_type.name)])
         else:
             filename = os.path.sep.join([path, 'tmp', '{fn}_{t}.png'.format(fn=_id, t=sticker_type)])
 

@@ -60,10 +60,11 @@ def parse_page_line(content: bytes):
     elif soup.find('span', {'class': 'MdIcoSound_b'}):
         sticker_type = StickerType.STATIC_WITH_SOUND_STICKER
 
-    title = soup.find('h3', {'class': 'mdCMN08Ttl'})
+    title = soup.find('p', {'class': 'mdCMN38Item01Ttl'})
     if title:
         title = title.text
     else:
+        print(soup)
         raise Exception('Error: Title not found')
     id_list = list()
     sticker_id_pattern = re.compile(r'stickershop/v1/sticker/(\d+)/\w+/sticker.png')
@@ -72,5 +73,5 @@ def parse_page_line(content: bytes):
         match = sticker_id_pattern.search(sticker['style'])
         if match:
             id_list.append(match.group(1))
-
+    id_list = list(set(id_list))
     return title, id_list, sticker_type

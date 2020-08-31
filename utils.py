@@ -17,13 +17,13 @@ class StickerSetSource(Enum):
 
 
 SET_URL_TEMPLATES = {
-    StickerSetSource.LINE: 'https://store.line.me/stickershop/product/{id}/en?from=sticker',
+    StickerSetSource.LINE: 'https://store.line.me/stickershop/product/{id}/{lang}?from=sticker',
     StickerSetSource.YABE: 'https://yabeline.tw/Stickers_Data.php?Number={id}'
 }
 
 STICKER_URL_TEMPLATES = {
     StickerType.SOUND: 'https://stickershop.line-scdn.net/stickershop/v1/sticker/{id}/IOS/sticker_sound.m4a',
-    StickerType.STATIC_STICKER: 'https://stickershop.line-scdn.net/stickershop/v1/sticker/{id}/android/sticker@2x.png',
+    StickerType.STATIC_STICKER: 'https://stickershop.line-scdn.net/stickershop/v1/sticker/{id}/iPhone/sticker@2x.png',
     StickerType.STATIC_WITH_SOUND_STICKER: 'https://stickershop.line-scdn.net/stickershop/v1/sticker/{id}/android/sticker@2x.png',
     StickerType.ANIMATED_STICKER: 'https://stickershop.line-scdn.net/stickershop/v1/sticker/{id}/IOS/sticker_animation@2x.png',
     StickerType.ANIMATED_AND_SOUND_STICKER: 'https://stickershop.line-scdn.net/stickershop/v1/sticker/{id}/IOS/sticker_animation@2x.png',
