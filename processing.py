@@ -1,3 +1,6 @@
+import datetime
+import math
+import os.path
 from enum import Enum
 from threading import Thread
 
@@ -9,6 +12,7 @@ class ProcessOption(Enum):
     SCALE = 'scale'
     TO_GIF = 'to_gif'
     TO_VIDEO = 'to_video'
+    TO_WEBM = 'to_webm'
 
 
 class ImageProcessorThread(Thread):
@@ -34,6 +38,8 @@ class ImageProcessorThread(Thread):
                         self.scale_image(in_file, out_file)
                     elif self.option == ProcessOption.TO_GIF:
                         self.to_gif(in_file, out_file)
+                    elif self.option == ProcessOption.TO_WEBM:
+                        self.to_webm(in_file, out_file)
                     else:
                         # shouldn't get there
                         pass
@@ -41,7 +47,8 @@ class ImageProcessorThread(Thread):
                 self.queue.task_done()
 
     def scale_image(self, in_file, out_file):
-        ffmpeg.input(in_file).filter('scale', w='if(gt(iw,ih),512,-1)', h='if(gt(iw,ih),-1,512)').output(out_file)
+        ffmpeg.input(in_file).filter('scale', w='if(gt(iw,ih),512,-1)', h='if(gt(iw,ih),-1,512)').output(out_file).run(
+            quiet=True)
 
     def remove_alpha_geq(self, in_stream):
         """
@@ -78,6 +85,43 @@ class ImageProcessorThread(Thread):
         else:
             return self.remove_alpha_overlay(in_stream)
 
+    def to_webm(self, in_file, out_file):
+
+        video_input = ffmpeg.input(in_file, f='apng').filter('scale', w='if(gt(iw,ih),512,-1)',
+                                                             h='if(gt(iw,ih),-1,512)')
+
+        ffmpeg.output(video_input, out_file).overwrite_output().run(quiet=True)
+
+        # probe, ensure it's max 3 seconds
+        duration_str = ffmpeg.probe(out_file)['streams'][0]['tags']['DURATION']
+        framerate_str = ffmpeg.probe(out_file)['streams'][0]['r_frame_rate']
+        framerate = round(int(framerate_str.split('/')[0]) / int(framerate_str.split('/')[1]))
+
+        hms, us = duration_str.split('.')
+        us = us[:6]
+        duration_str = f'{hms}.{us}'
+        duration_dt = datetime.datetime.strptime(duration_str, '%H:%M:%S.%f')
+        duration_seconds = datetime.timedelta(seconds=duration_dt.second,
+                                              microseconds=duration_dt.microsecond).total_seconds()
+        total_frames = round(duration_seconds * framerate)
+
+        if duration_seconds > 3:
+            # need to speedup: split image to frames and re-generate
+
+            new_framerate = math.ceil(total_frames / 3)
+            in_file_name = in_file.split(os.path.sep)[-1].split('.')[0]
+
+            frame_tmp_path = os.path.join(self.temp_dir, in_file_name)
+            try:
+                os.mkdir(frame_tmp_path)
+            except FileExistsError:
+                pass
+
+            video_input.output(os.path.join(frame_tmp_path, 'frame-%d.png'), start_number=0).overwrite_output().run(
+                quiet=True)
+            ffmpeg.input(os.path.join(frame_tmp_path, 'frame-%d.png'), start_number=0, framerate=new_framerate,
+                         ).output(out_file).overwrite_output().run(quiet=True)
+
     def to_gif(self, in_file, out_file):
         pix_fmt = ffmpeg.probe(in_file)['streams'][0]['pix_fmt']
         input_stream = ffmpeg.input(in_file, f='apng')
@@ -105,3 +149,10 @@ class ImageProcessorThread(Thread):
             streams.append(audio_input)
         ffmpeg.output(*streams, out_file, pix_fmt='yuv420p', movflags='faststart') \
             .overwrite_output().run(quiet=True)
+
+
+def process_video_sticker_icon(in_file, out_file):
+    ffmpeg.input(in_file, f='apng') \
+        .filter('scale', w='if(gt(iw,ih),100,-1)', h='if(gt(iw,ih),-1,100)') \
+        .filter('pad', w='100', h='100', x='(ow-iw)/2', y='(oh-ih)/2', color='black@0') \
+        .output(out_file).overwrite_output().run(quiet=True)

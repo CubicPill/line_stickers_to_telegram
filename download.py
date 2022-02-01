@@ -14,6 +14,16 @@ from spider import DownloadThread
 from utils import SET_URL_TEMPLATES, STICKER_URL_TEMPLATES, StickerType, StickerSetSource
 
 
+def prepare_video_sticker_icon(pack_id, temp_dir, output_path, proxies=None):
+    from spider import download_file
+    from processing import process_video_sticker_icon
+    url = STICKER_URL_TEMPLATES[StickerType.MAIN_ANIMATION].format(pack_id=pack_id)
+    download_path = os.path.join(temp_dir, 'mainimg.png')
+
+    download_file(url, download_path, proxies)
+    process_video_sticker_icon(download_path, output_path)
+
+
 def main():
     arg_parser = argparse.ArgumentParser(description='Download stickers from line store')
     arg_parser.add_argument('id', type=int, help='Product id of sticker set')
@@ -25,9 +35,12 @@ def main():
     arg_parser.add_argument('--static',
                             help='Download only static images (Will preserve APNG). Will override all other conversion options',
                             action='store_true')
-    arg_parser.add_argument('--to-gif', help='Convert animated PNG (.apng) to GIF', action='store_true')
+    arg_parser.add_argument('--to-gif', help='Convert animated PNG (.apng) to GIF, no scaling', action='store_true')
+    arg_parser.add_argument('--to-webm',
+                            help='Convert animated PNG (.apng) to WEBM, to be used in telegram video stickers, will scale to 512*(<512)',
+                            action='store_true')
     arg_parser.add_argument('--to-video',
-                            help='Convert sticker (static/animated/popup) to .mp4 video, with audio (if available). Static stickers without audio cannot be converted to video',
+                            help='Convert sticker (static/animated/popup) to .mp4 video, with audio (if available). No scaling. Static stickers without audio cannot be converted to video',
                             action='store_true')
     arg_parser.add_argument('-p', '--path', type=str, help='Path to download the stickers')
     arg_parser.add_argument('-t', '--threads', type=int, help='Thread number of downloader, default 4')
@@ -54,7 +67,7 @@ def main():
     if args.path:
         path = args.path
     else:
-        path = title
+        path = f'{args.id}.{title}'
     if not os.path.isdir(path):
         os.mkdir(path)
     if not os.path.isdir(path + os.path.sep + 'tmp'):
@@ -65,6 +78,8 @@ def main():
         option = ProcessOption.TO_VIDEO
     elif args.to_gif:
         option = ProcessOption.TO_GIF
+    elif args.to_webm:
+        option = ProcessOption.TO_WEBM
     elif args.no_scale:
         option = ProcessOption.NONE
     download_queue = Queue()
@@ -109,24 +124,35 @@ def main():
     print('Download done!')
 
     if option != ProcessOption.NONE:
+        # SCALE, VIDEO, GIF, WEBM
         print('Processing:', option.name)
         process_queue = Queue()
         while not download_completed_queue.empty():
             _id = download_completed_queue.get_nowait()
             if 'Audio' in _id:
                 continue
+            in_pic = os.path.sep.join([path, 'tmp', '{fn}_{t}.png'.format(fn=_id, t=sticker_type)])
+
             if option == ProcessOption.TO_VIDEO:
-                in_pic = os.path.sep.join([path, 'tmp', '{fn}_{t}.png'.format(fn=_id, t=sticker_type)])
                 in_audio = os.path.sep.join([path, 'tmp', '{fn}.m4a'.format(fn=_id)])
                 if not os.path.isfile(in_audio):
                     in_audio = None
                 out_file = os.path.sep.join([path, '{fn}.mp4'.format(fn=_id)])
                 process_queue.put_nowait((in_pic, in_audio, out_file))
-
             else:
-                in_file = os.path.sep.join([path, 'tmp', '{fn}_{t}.png'.format(fn=_id, t=sticker_type)])
-                out_file = os.path.sep.join([path, '{fn}.gif'.format(fn=_id)])
-                process_queue.put_nowait((in_file, out_file))
+                suffix = ''
+                if option == ProcessOption.TO_WEBM:
+                    suffix = 'webm'
+                elif option == ProcessOption.TO_GIF:
+                    suffix = 'gif'
+                elif option == ProcessOption.SCALE:
+                    suffix = 'png'
+                else:
+                    # shouldn't be there
+                    print(f'Error: Unrecognised process option: {option}')
+                out_file = os.path.sep.join([path, f'{_id}.{suffix}'])
+                process_queue.put_nowait((in_pic, out_file))
+
         processor = [ImageProcessorThread(process_queue, option, path + os.path.sep + 'tmp') for _ in range(4)]
         for p in processor:
             p.start()
@@ -139,6 +165,9 @@ def main():
             download_queue.join()
             process_queue.join()
             bar.clear()
+        if option == ProcessOption.TO_WEBM:
+            print('Downloading icon for webm stickers...')
+            prepare_video_sticker_icon(args.id, path + os.path.sep + 'tmp', os.path.join(path, 'icon.webm'), proxies)
         print('Process done!')
         shutil.rmtree(path + os.path.sep + 'tmp')
 
