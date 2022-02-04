@@ -1,6 +1,7 @@
 import datetime
 import math
 import os.path
+import queue
 from enum import Enum
 from threading import Thread
 
@@ -29,12 +30,15 @@ class ImageProcessorThread(Thread):
             return
         while not self.queue.empty():
             try:
+                in_files, out_file = self.queue.get_nowait()
+            except queue.Empty:
+                continue
+            try:
                 if self.option == ProcessOption.TO_VIDEO:
-                    in_pic, in_audio, out_file = self.queue.get_nowait()
+                    in_pic, in_audio = in_files
                     self.to_video(in_pic, in_audio, out_file)
                 else:
-
-                    in_file, out_file = self.queue.get_nowait()
+                    in_file = in_files
                     if self.option == ProcessOption.SCALE:
                         self.scale_image(in_file, out_file)
                     elif self.option == ProcessOption.TO_GIF:
@@ -43,7 +47,16 @@ class ImageProcessorThread(Thread):
                         self.to_webm(in_file, out_file)
                     else:
                         # shouldn't get there
-                        pass
+                        print('Unexpected Option:', self.option)
+                        continue
+            except ffmpeg.Error as e:
+                print('Error occurred:', e, out_file)
+                print('------stdout------')
+                print(e.stdout.decode())
+                print('------end------')
+                print('------stderr------')
+                print(e.stderr.decode())
+                print('------end------')
             finally:
                 self.queue.task_done()
 
@@ -101,12 +114,14 @@ class ImageProcessorThread(Thread):
             except FileExistsError:
                 pass
 
-            framerate_str = ffmpeg.probe(out_file)['streams'][0]['r_frame_rate']
+            framerate_str = ffmpeg.probe(in_file)['streams'][0]['r_frame_rate']
             framerate = round(int(framerate_str.split('/')[0]) / int(framerate_str.split('/')[1]))
 
-            ffmpeg.input(in_file, f='apng').output(os.path.join(frame_tmp_path, 'frame-convert-%d.png'),
-                                                   start_number=0).overwrite_output().run(
-                quiet=True)
+            ffmpeg.input(in_file, f='apng'). \
+                output(os.path.join(frame_tmp_path, 'frame-convert-%d.png'), start_number=0) \
+                .overwrite_output(). \
+                run(quiet=True)
+
             for fn in os.listdir(frame_tmp_path):
                 if fn.startswith('frame-convert'):
                     fn_full = os.path.join(frame_tmp_path, fn)
