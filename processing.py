@@ -17,6 +17,15 @@ class ProcessOption(Enum):
     TO_WEBM = 'to_webm'
 
 
+class ProcessUnit:
+    def __init__(self, unique_id, in_img, in_audio, out_file, process_option: ProcessOption):
+        self.id = unique_id
+        self.in_img = in_img
+        self.in_audio = in_audio
+        self.out_file = out_file
+        self.process_option = process_option
+
+
 class ImageProcessorThread(Thread):
     def __init__(self, queue, option: ProcessOption, temp_dir):
         Thread.__init__(self, name='ImageProcessorThread')
@@ -99,20 +108,21 @@ class ImageProcessorThread(Thread):
         else:
             return self.remove_alpha_overlay(in_stream)
 
+    def make_frame_temp_dir(self, uid):
+        frame_tmp_path = os.path.join(self.temp_dir, uid)
+        try:
+            os.mkdir(frame_tmp_path)
+        except FileExistsError:
+            pass
+        return frame_tmp_path
+
     def to_webm(self, in_file, out_file):
 
         if ffmpeg.probe(in_file)['streams'][0]['pix_fmt'] == 'pal8':
-            # need to split frames, convert color, then put back
-            # TODO reuse code
-
+            # need to split frames, convert color, then replace in_file
             new_in_file = in_file + '.convert.png'
             in_file_name = in_file.split(os.path.sep)[-1].split('.')[0]
-
-            frame_tmp_path = os.path.join(self.temp_dir, in_file_name)
-            try:
-                os.mkdir(frame_tmp_path)
-            except FileExistsError:
-                pass
+            frame_tmp_path = self.make_frame_temp_dir(in_file_name)
 
             framerate_str = ffmpeg.probe(in_file)['streams'][0]['r_frame_rate']
             framerate = round(int(framerate_str.split('/')[0]) / int(framerate_str.split('/')[1]))
@@ -124,6 +134,7 @@ class ImageProcessorThread(Thread):
 
             for fn in os.listdir(frame_tmp_path):
                 if fn.startswith('frame-convert'):
+                    # convert color to rgba
                     fn_full = os.path.join(frame_tmp_path, fn)
                     image = Image.open(fn_full)
                     image = image.convert('RGBA')
@@ -131,12 +142,14 @@ class ImageProcessorThread(Thread):
             ffmpeg.input(os.path.join(frame_tmp_path, 'frame-convert-%d.png'), start_number=0, framerate=framerate,
                          ).output(new_in_file, f='apng').overwrite_output().run(quiet=True)
             in_file = new_in_file
+
         video_input = ffmpeg.input(in_file, f='apng').filter('scale', w='if(gt(iw,ih),512,-1)',
                                                              h='if(gt(iw,ih),-1,512)')
 
         ffmpeg.output(video_input, out_file).overwrite_output().run(quiet=True)
 
         # probe, ensure it's max 3 seconds
+        # length is not available in apng, must probe converted webm
         duration_str = ffmpeg.probe(out_file)['streams'][0]['tags']['DURATION']
         framerate_str = ffmpeg.probe(out_file)['streams'][0]['r_frame_rate']
         framerate = round(int(framerate_str.split('/')[0]) / int(framerate_str.split('/')[1]))
@@ -155,11 +168,7 @@ class ImageProcessorThread(Thread):
             new_framerate = math.ceil((total_frames + 1) / 3)
             in_file_name = in_file.split(os.path.sep)[-1].split('.')[0]
 
-            frame_tmp_path = os.path.join(self.temp_dir, in_file_name)
-            try:
-                os.mkdir(frame_tmp_path)
-            except FileExistsError:
-                pass
+            frame_tmp_path = self.make_frame_temp_dir(in_file_name)
 
             video_input.output(os.path.join(frame_tmp_path, 'frame-%d.png'), start_number=0).overwrite_output().run(
                 quiet=True)

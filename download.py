@@ -2,6 +2,7 @@ import argparse
 import os
 import re
 import shutil
+import tempfile
 import time
 from queue import Queue
 
@@ -65,14 +66,16 @@ def main():
     print('Total number of stickers:', len(id_list))
     # remove invalid characters in folder name
     if args.path:
-        path = args.path
+        sticker_root_path = args.path
     else:
-        path = f'{args.id}.{title}'
-    if not os.path.isdir(path):
-        os.mkdir(path)
-    if not os.path.isdir(path + os.path.sep + 'tmp'):
-        os.mkdir(path + os.path.sep + 'tmp')
-    print('Downloading to:', path)
+        sticker_root_path = f'{args.id}.{title}'
+    sticker_raw_dl_path = os.path.join(sticker_root_path, 'raw')
+    sticker_temp_store_path = tempfile.mkdtemp()
+    if not os.path.isdir(sticker_root_path):
+        os.mkdir(sticker_root_path)
+    if not os.path.isdir(sticker_raw_dl_path):
+        os.mkdir(sticker_raw_dl_path)
+    print('Downloading to:', sticker_root_path)
     option = ProcessOption.SCALE
     if args.to_video:
         option = ProcessOption.TO_VIDEO
@@ -86,11 +89,8 @@ def main():
     download_completed_queue = Queue()
     downloader = [DownloadThread(download_queue, download_completed_queue, proxies) for _ in range(thread_num)]
     for _id in id_list:
-        if option == ProcessOption.NONE:
 
-            filename = os.path.sep.join([path, '{fn}_{t}.png'.format(fn=_id, t=sticker_type.name)])
-        else:
-            filename = os.path.sep.join([path, 'tmp', '{fn}_{t}.png'.format(fn=_id, t=sticker_type)])
+        filename = os.path.sep.join([sticker_raw_dl_path, '{fn}_{t}.png'.format(fn=_id, t=sticker_type.name)])
 
         url = STICKER_URL_TEMPLATES[sticker_type].format(id=_id)
         download_queue.put((_id, url, filename))
@@ -98,7 +98,7 @@ def main():
                             StickerType.ANIMATED_AND_SOUND_STICKER,
                             StickerType.POPUP_AND_SOUND_STICKER] \
                 and option == ProcessOption.TO_VIDEO:
-            filename = os.path.sep.join([path, 'tmp', '{fn}.m4a'.format(fn=_id)])
+            filename = os.path.sep.join([sticker_raw_dl_path, '{fn}.m4a'.format(fn=_id)])
             url = STICKER_URL_TEMPLATES[StickerType.SOUND].format(id=_id)
             download_queue.put(('{}|Audio'.format(_id), url, filename))
 
@@ -119,6 +119,8 @@ def main():
             last = download_queue.qsize()
             time.sleep(0.1)
         download_queue.join()
+        bar.n = total_count
+        bar.refresh()
         bar.clear()
 
     print('Download done!')
@@ -131,13 +133,13 @@ def main():
             _id = download_completed_queue.get_nowait()
             if 'Audio' in _id:
                 continue
-            in_pic = os.path.sep.join([path, 'tmp', '{fn}_{t}.png'.format(fn=_id, t=sticker_type)])
+            in_pic = os.path.sep.join([sticker_raw_dl_path, '{fn}_{t}.png'.format(fn=_id, t=sticker_type)])
 
             if option == ProcessOption.TO_VIDEO:
-                in_audio = os.path.sep.join([path, 'tmp', '{fn}.m4a'.format(fn=_id)])
+                in_audio = os.path.sep.join([sticker_raw_dl_path, '{fn}.m4a'.format(fn=_id)])
                 if not os.path.isfile(in_audio):
                     in_audio = None
-                out_file = os.path.sep.join([path, '{fn}.mp4'.format(fn=_id)])
+                out_file = os.path.sep.join([sticker_root_path, '{fn}.mp4'.format(fn=_id)])
                 process_queue.put_nowait((in_pic, in_audio, out_file))
             else:
                 suffix = ''
@@ -150,10 +152,10 @@ def main():
                 else:
                     # shouldn't be there
                     print(f'Error: Unrecognised process option: {option}')
-                out_file = os.path.sep.join([path, f'{_id}.{suffix}'])
+                out_file = os.path.sep.join([sticker_root_path, f'{_id}.{suffix}'])
                 process_queue.put_nowait((in_pic, out_file))
 
-        processor = [ImageProcessorThread(process_queue, option, path + os.path.sep + 'tmp') for _ in range(4)]
+        processor = [ImageProcessorThread(process_queue, option, sticker_temp_store_path) for _ in range(4)]
         for p in processor:
             p.start()
         with tqdm(total=total_count) as bar:
@@ -167,9 +169,10 @@ def main():
             bar.clear()
         if option == ProcessOption.TO_WEBM:
             print('Downloading icon for webm stickers...')
-            prepare_video_sticker_icon(args.id, path + os.path.sep + 'tmp', os.path.join(path, 'icon.webm'), proxies)
+            prepare_video_sticker_icon(args.id, sticker_temp_store_path, os.path.join(sticker_root_path, 'icon.webm'),
+                                       proxies)
         print('Process done!')
-        #shutil.rmtree(path + os.path.sep + 'tmp')
+        shutil.rmtree(sticker_temp_store_path)
 
 
 if __name__ == '__main__':
