@@ -169,7 +169,7 @@ def main():
             print('Downloading icon for webm stickers...')
             prepare_video_sticker_icon(args.id, path + os.path.sep + 'tmp', os.path.join(path, 'icon.webm'), proxies)
         print('Process done!')
-        shutil.rmtree(path + os.path.sep + 'tmp')
+        #shutil.rmtree(path + os.path.sep + 'tmp')
 
 
 if __name__ == '__main__':

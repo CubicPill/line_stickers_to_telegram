@@ -5,6 +5,7 @@ from enum import Enum
 from threading import Thread
 
 import ffmpeg
+from PIL import Image
 
 
 class ProcessOption(Enum):
@@ -87,6 +88,34 @@ class ImageProcessorThread(Thread):
 
     def to_webm(self, in_file, out_file):
 
+        if ffmpeg.probe(in_file)['streams'][0]['pix_fmt'] == 'pal8':
+            # need to split frames, convert color, then put back
+            # TODO reuse code
+
+            new_in_file = in_file + '.convert.png'
+            in_file_name = in_file.split(os.path.sep)[-1].split('.')[0]
+
+            frame_tmp_path = os.path.join(self.temp_dir, in_file_name)
+            try:
+                os.mkdir(frame_tmp_path)
+            except FileExistsError:
+                pass
+
+            framerate_str = ffmpeg.probe(out_file)['streams'][0]['r_frame_rate']
+            framerate = round(int(framerate_str.split('/')[0]) / int(framerate_str.split('/')[1]))
+
+            ffmpeg.input(in_file, f='apng').output(os.path.join(frame_tmp_path, 'frame-convert-%d.png'),
+                                                   start_number=0).overwrite_output().run(
+                quiet=True)
+            for fn in os.listdir(frame_tmp_path):
+                if fn.startswith('frame-convert'):
+                    fn_full = os.path.join(frame_tmp_path, fn)
+                    image = Image.open(fn_full)
+                    image = image.convert('RGBA')
+                    image.save(fn_full)
+            ffmpeg.input(os.path.join(frame_tmp_path, 'frame-convert-%d.png'), start_number=0, framerate=framerate,
+                         ).output(new_in_file, f='apng').overwrite_output().run(quiet=True)
+            in_file = new_in_file
         video_input = ffmpeg.input(in_file, f='apng').filter('scale', w='if(gt(iw,ih),512,-1)',
                                                              h='if(gt(iw,ih),-1,512)')
 
@@ -108,7 +137,7 @@ class ImageProcessorThread(Thread):
         if duration_seconds > 3:
             # need to speedup: split image to frames and re-generate
 
-            new_framerate = math.ceil(total_frames / 3)
+            new_framerate = math.ceil((total_frames + 1) / 3)
             in_file_name = in_file.split(os.path.sep)[-1].split('.')[0]
 
             frame_tmp_path = os.path.join(self.temp_dir, in_file_name)

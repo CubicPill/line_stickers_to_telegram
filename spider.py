@@ -1,11 +1,14 @@
 from threading import Thread
 
 import requests
-
+import os
 from utils import FAKE_HEADERS
 
 
 def download_file(url, filename, proxies):
+    if os.path.isfile(filename):
+        # file exist
+        return
     r = requests.get(url, proxies=proxies, headers=FAKE_HEADERS)
     with open(filename, 'wb') as f:
         f.write(r.content)
