@@ -15,6 +15,8 @@ class ProcessOption(Enum):
     TO_GIF = 'to_gif'
     TO_VIDEO = 'to_video'
     TO_WEBM = 'to_webm'
+    ICON_WEBM = 'icon_webm'
+    ICON_REGULAR = 'icon_regular'
 
 
 class ProcessUnit:
@@ -27,39 +29,36 @@ class ProcessUnit:
 
 
 class ImageProcessorThread(Thread):
-    def __init__(self, queue, option: ProcessOption, temp_dir):
+    def __init__(self, queue, temp_dir):
         Thread.__init__(self, name='ImageProcessorThread')
         self.queue = queue
-        self.option = option
         self.temp_dir = temp_dir
 
     def run(self):
-        if self.option == ProcessOption.NONE:
-            # this should not happen, bro. Why are you creating this thread?
-            return
         while not self.queue.empty():
             try:
-                in_files, out_file = self.queue.get_nowait()
+                unit: ProcessUnit = self.queue.get_nowait()
             except queue.Empty:
                 continue
+
             try:
-                if self.option == ProcessOption.TO_VIDEO:
-                    in_pic, in_audio = in_files
-                    self.to_video(in_pic, in_audio, out_file)
+                if unit.process_option == ProcessOption.TO_VIDEO:
+                    self.to_video(unit.in_img, unit.in_audio, unit.out_file)
                 else:
-                    in_file = in_files
-                    if self.option == ProcessOption.SCALE:
-                        self.scale_image(in_file, out_file)
-                    elif self.option == ProcessOption.TO_GIF:
-                        self.to_gif(in_file, out_file)
-                    elif self.option == ProcessOption.TO_WEBM:
-                        self.to_webm(in_file, out_file)
+                    if unit.process_option == ProcessOption.SCALE:
+                        self.scale_image(unit.in_img, unit.out_file)
+                    elif unit.process_option == ProcessOption.TO_GIF:
+                        self.to_gif(unit.in_img, unit.out_file)
+                    elif unit.process_option == ProcessOption.TO_WEBM:
+                        self.to_webm(unit.id, unit.in_img, unit.out_file)
+                    elif unit.process_option == ProcessOption.NONE:
+                        continue
                     else:
                         # shouldn't get there
-                        print('Unexpected Option:', self.option)
+                        print('Unexpected Option:', unit.process_option)
                         continue
             except ffmpeg.Error as e:
-                print('Error occurred:', e, out_file)
+                print('Error occurred:', e, unit.out_file)
                 print('------stdout------')
                 print(e.stdout.decode())
                 print('------end------')
@@ -116,13 +115,12 @@ class ImageProcessorThread(Thread):
             pass
         return frame_tmp_path
 
-    def to_webm(self, in_file, out_file):
+    def to_webm(self, uid, in_file, out_file):
 
         if ffmpeg.probe(in_file)['streams'][0]['pix_fmt'] == 'pal8':
             # need to split frames, convert color, then replace in_file
-            new_in_file = in_file + '.convert.png'
-            in_file_name = in_file.split(os.path.sep)[-1].split('.')[0]
-            frame_tmp_path = self.make_frame_temp_dir(in_file_name)
+            new_in_file = os.path.join(self.temp_dir, uid + '.convert.png')
+            frame_tmp_path = self.make_frame_temp_dir(uid)
 
             framerate_str = ffmpeg.probe(in_file)['streams'][0]['r_frame_rate']
             framerate = round(int(framerate_str.split('/')[0]) / int(framerate_str.split('/')[1]))
@@ -139,8 +137,11 @@ class ImageProcessorThread(Thread):
                     image = Image.open(fn_full)
                     image = image.convert('RGBA')
                     image.save(fn_full)
-            ffmpeg.input(os.path.join(frame_tmp_path, 'frame-convert-%d.png'), start_number=0, framerate=framerate,
-                         ).output(new_in_file, f='apng').overwrite_output().run(quiet=True)
+            ffmpeg.input(os.path.join(frame_tmp_path, 'frame-convert-%d.png'),
+                         start_number=0, framerate=framerate, ) \
+                .output(new_in_file, f='apng') \
+                .overwrite_output() \
+                .run(quiet=True)
             in_file = new_in_file
 
         video_input = ffmpeg.input(in_file, f='apng').filter('scale', w='if(gt(iw,ih),512,-1)',
@@ -166,9 +167,8 @@ class ImageProcessorThread(Thread):
             # need to speedup: split image to frames and re-generate
 
             new_framerate = math.ceil((total_frames + 1) / 3)
-            in_file_name = in_file.split(os.path.sep)[-1].split('.')[0]
 
-            frame_tmp_path = self.make_frame_temp_dir(in_file_name)
+            frame_tmp_path = self.make_frame_temp_dir(uid)
 
             video_input.output(os.path.join(frame_tmp_path, 'frame-%d.png'), start_number=0).overwrite_output().run(
                 quiet=True)
@@ -205,6 +205,14 @@ class ImageProcessorThread(Thread):
 
 
 def process_video_sticker_icon(in_file, out_file):
+    ffmpeg.input(in_file, f='apng') \
+        .filter('scale', w='if(gt(iw,ih),100,-1)', h='if(gt(iw,ih),-1,100)') \
+        .filter('pad', w='100', h='100', x='(ow-iw)/2', y='(oh-ih)/2', color='black@0') \
+        .output(out_file).overwrite_output().run(quiet=True)
+
+
+def process_regular_sticker_icon(in_file, out_file):
+    # TODO what's the difference between video and regular?
     ffmpeg.input(in_file, f='apng') \
         .filter('scale', w='if(gt(iw,ih),100,-1)', h='if(gt(iw,ih),-1,100)') \
         .filter('pad', w='100', h='100', x='(ow-iw)/2', y='(oh-ih)/2', color='black@0') \

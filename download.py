@@ -10,7 +10,7 @@ import requests
 from tqdm import tqdm
 
 from parse import parse_page
-from processing import ImageProcessorThread, ProcessOption
+from processing import ImageProcessorThread, ProcessOption, ProcessUnit
 from spider import DownloadThread
 from utils import SET_URL_TEMPLATES, STICKER_URL_TEMPLATES, StickerType, StickerSetSource
 
@@ -25,6 +25,16 @@ def prepare_video_sticker_icon(pack_id, temp_dir, output_path, proxies=None):
     process_video_sticker_icon(download_path, output_path)
 
 
+def prepare_regular_sticker_icon(pack_id, temp_dir, output_path, proxies=None):
+    from spider import download_file
+    from processing import process_regular_sticker_icon
+    url = STICKER_URL_TEMPLATES[StickerType.MAIN_ANIMATION].format(pack_id=pack_id)
+    download_path = os.path.join(temp_dir, 'mainimg.png')
+
+    download_file(url, download_path, proxies)
+    process_regular_sticker_icon(download_path, output_path)
+
+
 def main():
     arg_parser = argparse.ArgumentParser(description='Download stickers from line store')
     arg_parser.add_argument('id', type=int, help='Product id of sticker set')
@@ -32,7 +42,7 @@ def main():
     arg_parser.add_argument('--lang', type=str,
                             help='Language(Zone) to get sticker. Could be "en", "ja", "zh-Hant" and others. Default is "en"')
     arg_parser.add_argument('--proxy', type=str, help='HTTPS proxy, addr:port')
-    arg_parser.add_argument('--no-scale', help='Disable static stickers auto resizing to 512*512', action='store_false')
+    arg_parser.add_argument('--no-scale', help='Disable static stickers auto resizing to 512*512', action='store_true')
     arg_parser.add_argument('--static',
                             help='Download only static images (Will preserve APNG). Will override all other conversion options',
                             action='store_true')
@@ -87,10 +97,11 @@ def main():
         option = ProcessOption.NONE
     download_queue = Queue()
     download_completed_queue = Queue()
+    # TODO move the icon download here
     downloader = [DownloadThread(download_queue, download_completed_queue, proxies) for _ in range(thread_num)]
     for _id in id_list:
 
-        filename = os.path.sep.join([sticker_raw_dl_path, '{fn}_{t}.png'.format(fn=_id, t=sticker_type.name)])
+        filename = os.path.sep.join([sticker_raw_dl_path, '{fn}.{t}.png'.format(fn=_id, t=sticker_type.name)])
 
         url = STICKER_URL_TEMPLATES[sticker_type].format(id=_id)
         download_queue.put((_id, url, filename))
@@ -133,14 +144,14 @@ def main():
             _id = download_completed_queue.get_nowait()
             if 'Audio' in _id:
                 continue
-            in_pic = os.path.sep.join([sticker_raw_dl_path, '{fn}_{t}.png'.format(fn=_id, t=sticker_type)])
+            in_pic = os.path.sep.join([sticker_raw_dl_path, '{fn}.{t}.png'.format(fn=_id, t=sticker_type.name)])
 
             if option == ProcessOption.TO_VIDEO:
                 in_audio = os.path.sep.join([sticker_raw_dl_path, '{fn}.m4a'.format(fn=_id)])
                 if not os.path.isfile(in_audio):
                     in_audio = None
                 out_file = os.path.sep.join([sticker_root_path, '{fn}.mp4'.format(fn=_id)])
-                process_queue.put_nowait((in_pic, in_audio, out_file))
+                process_queue.put_nowait(ProcessUnit(_id, in_pic, in_audio, out_file, option))
             else:
                 suffix = ''
                 if option == ProcessOption.TO_WEBM:
@@ -153,9 +164,9 @@ def main():
                     # shouldn't be there
                     print(f'Error: Unrecognised process option: {option}')
                 out_file = os.path.sep.join([sticker_root_path, f'{_id}.{suffix}'])
-                process_queue.put_nowait((in_pic, out_file))
+                process_queue.put_nowait(ProcessUnit(_id, in_pic, None, out_file, option))
 
-        processor = [ImageProcessorThread(process_queue, option, sticker_temp_store_path) for _ in range(4)]
+        processor = [ImageProcessorThread(process_queue, sticker_temp_store_path) for _ in range(4)]
         for p in processor:
             p.start()
         with tqdm(total=total_count) as bar:
@@ -166,13 +177,17 @@ def main():
                 time.sleep(0.1)
             download_queue.join()
             process_queue.join()
+            bar.n = total_count
+            bar.refresh()
             bar.clear()
+
         if option == ProcessOption.TO_WEBM:
             print('Downloading icon for webm stickers...')
             prepare_video_sticker_icon(args.id, sticker_temp_store_path, os.path.join(sticker_root_path, 'icon.webm'),
                                        proxies)
         print('Process done!')
-        shutil.rmtree(sticker_temp_store_path)
+    # remove temp dir
+    shutil.rmtree(sticker_temp_store_path)
 
 
 if __name__ == '__main__':
