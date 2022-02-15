@@ -40,8 +40,8 @@ def get_sticker_icon_and_name(url):
 
 
 def main():
-    arg_parser = argparse.ArgumentParser(description='Download stickers from line store')
-    arg_parser.add_argument('url', type=str, help='Product id of sticker set')
+    arg_parser = argparse.ArgumentParser(description='Download stickers from Kakao store')
+    arg_parser.add_argument('url', type=str, help='URL of sticker set')
     arg_parser.add_argument('--proxy', type=str, help='HTTPS proxy, addr:port')
     arg_parser.add_argument('--no-processing', help='No processing', action='store_true')
     arg_parser.add_argument('--static',
@@ -55,6 +55,11 @@ def main():
                             action='store_true')
     arg_parser.add_argument('-p', '--path', type=str, help='Path to download the stickers')
     args = arg_parser.parse_args()
+
+    if not args.to_webm:
+        print('Sorry, only webm is currently supported')
+        raise NotImplementedError
+
     proxies = {}
     if args.proxy:
         proxies['https'] = args.proxy

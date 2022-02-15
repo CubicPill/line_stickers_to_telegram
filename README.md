@@ -82,5 +82,35 @@ Method 1 is ~2.5x faster than method 2. But it cannot handle cases with `ya8` pi
 - Telegram has a limit on the size and length of video stickers, which is 256KiB and 3 seconds, respectively. (As of 01/02/2022)
 This script takes care of the length (by splitting the animation to individual frames and re-generate video using a larger framerate),
 but the size is not currently considered (In most cases size won't be a problem).
-- The script will delete the downloaded file and only keep the processed file. 
-This behaviour will be altered in the future and possibly a database will be added to re-use downloaded files.
+
+## Extra
+
+### Support for Kakao animation stickers
+```
+usage: kakao_dl.py [-h] [--proxy PROXY] [--no-processing] [--static] [--to-gif] [--to-webm] [--to-video] [-p PATH] url
+
+Download stickers from Kakao store
+
+positional arguments:
+  url                   URL of sticker set
+
+optional arguments:
+  -h, --help            show this help message and exit
+  --proxy PROXY         HTTPS proxy, addr:port
+  --no-processing       No processing
+  --static              Download only static images.
+  --to-gif              Convert to GIF, no scaling
+  --to-webm             Convert to WEBM, to be used in telegram video stickers, will scale to 512*(<512)
+  --to-video            Convert sticker (animated) to .mp4 video, with audio (if available). No scaling. Static stickers without audio cannot be converted to video   
+  -p PATH, --path PATH  Path to download the stickers
+```
+
+The URL of sticker is the URL when sharing sticker set in Kakao mobile client. For example:
+
+https://emoticon.kakao.com/items/sm2j7IoGGxH8xYzR08X8h4sReq4=?lang=en&referer=share_link
+
+Currently, **only Kakao WebP to WebM** is supported. More support may be added later.
+
+#### Known bugs
+- The converted WebM video may look blotchy when viewed using system player. However, in telegram the video looks normal.
+- The playback speed is too fast in iOS client. Windows and Android client are OK. Might be a bug of Telegram.
