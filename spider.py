@@ -1,7 +1,8 @@
+import os
 from threading import Thread
 
 import requests
-import os
+
 from utils import FAKE_HEADERS
 
 

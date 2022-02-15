@@ -16,7 +16,7 @@ class ProcessOption(Enum):
     TO_VIDEO = 'to_video'
     TO_WEBM = 'to_webm'
     ICON_WEBM = 'icon_webm'
-    ICON_REGULAR = 'icon_regular'
+    ICON_VIDEO_REGULAR = 'icon_video_regular'
 
 
 class ProcessUnit:
@@ -51,6 +51,8 @@ class ImageProcessorThread(Thread):
                         self.to_gif(unit.in_img, unit.out_file)
                     elif unit.process_option == ProcessOption.TO_WEBM:
                         self.to_webm(unit.id, unit.in_img, unit.out_file)
+                    elif unit.process_option == ProcessOption.ICON_VIDEO_REGULAR:
+                        self.process_video_or_regular_sticker_icon(unit.id, unit.in_img, unit.out_file)
                     elif unit.process_option == ProcessOption.NONE:
                         continue
                     else:
@@ -116,8 +118,11 @@ class ImageProcessorThread(Thread):
         return frame_tmp_path
 
     def to_webm(self, uid, in_file, out_file):
-
-        if ffmpeg.probe(in_file)['streams'][0]['pix_fmt'] == 'pal8':
+        try:
+            pix_fmt = ffmpeg.probe(in_file)['streams'][0]['pix_fmt']
+        except KeyError:
+            pix_fmt = 'unknown'
+        if pix_fmt == 'pal8':
             # need to split frames, convert color, then replace in_file
             new_in_file = os.path.join(self.temp_dir, uid + '.convert.png')
             frame_tmp_path = self.make_frame_temp_dir(uid)
@@ -203,16 +208,14 @@ class ImageProcessorThread(Thread):
         ffmpeg.output(*streams, out_file, pix_fmt='yuv420p', movflags='faststart') \
             .overwrite_output().run(quiet=True)
 
+    def process_video_or_regular_sticker_icon(self, uid, in_file, out_file):
+        ffmpeg.input(in_file, f='apng') \
+            .filter('scale', w='if(gt(iw,ih),100,-1)', h='if(gt(iw,ih),-1,100)') \
+            .filter('pad', w='100', h='100', x='(ow-iw)/2', y='(oh-ih)/2', color='black@0') \
+            .output(out_file).overwrite_output().run(quiet=True)
 
-def process_video_sticker_icon(in_file, out_file):
-    ffmpeg.input(in_file, f='apng') \
-        .filter('scale', w='if(gt(iw,ih),100,-1)', h='if(gt(iw,ih),-1,100)') \
-        .filter('pad', w='100', h='100', x='(ow-iw)/2', y='(oh-ih)/2', color='black@0') \
-        .output(out_file).overwrite_output().run(quiet=True)
 
-
-def process_regular_sticker_icon(in_file, out_file):
-    # TODO what's the difference between video and regular?
+def process_video_or_regular_sticker_icon(in_file, out_file):
     ffmpeg.input(in_file, f='apng') \
         .filter('scale', w='if(gt(iw,ih),100,-1)', h='if(gt(iw,ih),-1,100)') \
         .filter('pad', w='100', h='100', x='(ow-iw)/2', y='(oh-ih)/2', color='black@0') \

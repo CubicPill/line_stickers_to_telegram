@@ -17,22 +17,22 @@ from utils import SET_URL_TEMPLATES, STICKER_URL_TEMPLATES, StickerType, Sticker
 
 def prepare_video_sticker_icon(pack_id, temp_dir, output_path, proxies=None):
     from spider import download_file
-    from processing import process_video_sticker_icon
+    from processing import process_video_or_regular_sticker_icon
     url = STICKER_URL_TEMPLATES[StickerType.MAIN_ANIMATION].format(pack_id=pack_id)
     download_path = os.path.join(temp_dir, 'mainimg.png')
 
     download_file(url, download_path, proxies)
-    process_video_sticker_icon(download_path, output_path)
+    process_video_or_regular_sticker_icon(download_path, output_path)
 
 
 def prepare_regular_sticker_icon(pack_id, temp_dir, output_path, proxies=None):
     from spider import download_file
-    from processing import process_regular_sticker_icon
+    from processing import process_video_or_regular_sticker_icon
     url = STICKER_URL_TEMPLATES[StickerType.MAIN_ANIMATION].format(pack_id=pack_id)
     download_path = os.path.join(temp_dir, 'mainimg.png')
 
     download_file(url, download_path, proxies)
-    process_regular_sticker_icon(download_path, output_path)
+    process_video_or_regular_sticker_icon(download_path, output_path)
 
 
 def main():

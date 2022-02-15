@@ -9,7 +9,7 @@ class StickerType(Enum):
     ANIMATED_AND_SOUND_STICKER = 'animated&sound'
     POPUP_AND_SOUND_STICKER = 'popup&sound'
     SOUND = 'sound'
-    MAIN_ANIMATION='main_animation'
+    MAIN_ANIMATION = 'main_animation'
 
 
 class StickerSetSource(Enum):
@@ -27,7 +27,7 @@ STICKER_URL_TEMPLATES = {
     StickerType.STATIC_STICKER: 'https://stickershop.line-scdn.net/stickershop/v1/sticker/{id}/iPhone/sticker@2x.png',
     StickerType.STATIC_WITH_SOUND_STICKER: 'https://stickershop.line-scdn.net/stickershop/v1/sticker/{id}/android/sticker@2x.png',
     StickerType.ANIMATED_STICKER: 'https://stickershop.line-scdn.net/stickershop/v1/sticker/{id}/IOS/sticker_animation@2x.png',
-    StickerType.MAIN_ANIMATION:'https://stickershop.line-scdn.net/stickershop/v1/product/{pack_id}/IOS/main_animation.png',
+    StickerType.MAIN_ANIMATION: 'https://stickershop.line-scdn.net/stickershop/v1/product/{pack_id}/IOS/main_animation.png',
     StickerType.ANIMATED_AND_SOUND_STICKER: 'https://stickershop.line-scdn.net/stickershop/v1/sticker/{id}/IOS/sticker_animation@2x.png',
     StickerType.POPUP_STICKER: 'https://stickershop.line-scdn.net/stickershop/v1/sticker/{id}/IOS/sticker_popup@2x.png',
     StickerType.POPUP_AND_SOUND_STICKER: 'https://stickershop.line-scdn.net/stickershop/v1/sticker/{id}/IOS/sticker_popup@2x.png'
