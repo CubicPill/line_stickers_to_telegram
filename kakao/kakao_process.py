@@ -1,4 +1,5 @@
 import datetime
+import math
 import os
 import shutil
 import subprocess
@@ -50,10 +51,13 @@ class KakaoWebpProcessor(Thread):
                 f.write(f'duration {d}\n')
         return os.path.join(frame_working_dir_path, 'frames.txt')
 
-    def scale_and_concat_frame(self, frame_file_path, out_file):
+    def scale_and_concat_frame(self, frame_file_path, out_file, framerate):
+        # framerate is needed here since telegram ios client will use framerate as play speed
+        # ffmpeg will use 25 by default, making it playing too fast
+        # https://bugs.telegram.org/c/14778
         ffmpeg.input(frame_file_path, format='concat') \
             .filter('scale', w='if(gt(iw,ih),512,-1)', h='if(gt(iw,ih),-1,512)') \
-            .output(out_file) \
+            .output(out_file, r=framerate) \
             .overwrite_output() \
             .run(quiet=True)
 
@@ -71,7 +75,8 @@ class KakaoWebpProcessor(Thread):
         durations = [round(int(f) / 100.0, 2) for f in frame_data.split(',') if f]
 
         frame_file_path = self.make_frame_file(durations, frame_working_dir_path)
-        self.scale_and_concat_frame(frame_file_path, out_file)
+        avg_framerate = math.ceil((len(durations) + 1) / sum(durations) + 1)
+        self.scale_and_concat_frame(frame_file_path, out_file, avg_framerate)
 
         return durations
 
@@ -88,17 +93,18 @@ class KakaoWebpProcessor(Thread):
                                               microseconds=duration_dt.microsecond).total_seconds()
 
         if duration_seconds > 3:
-            # print('Speedup needed', uid)
+            print('Speedup needed', uid)
             # need to speedup
             total_duration_sum = sum(durations)
-            # print(f'Detected:{duration_seconds}s, calculated:{total_duration_sum}s')
+            print(f'Detected:{duration_seconds}s, calculated:{total_duration_sum}s')
 
             factor = total_duration_sum / 3.0
-            new_durations = [round(d / factor, 3) for d in durations]
+            new_durations = [int(d / factor * 1000) / 1000 for d in durations]
+            new_avg_framerate = math.ceil((len(new_durations) + 1) / sum(new_durations))
 
             frame_working_dir_path = self.make_frame_temp_dir(uid)
             frame_file_path = self.make_frame_file(new_durations, frame_working_dir_path)
-            self.scale_and_concat_frame(frame_file_path, out_file)
+            self.scale_and_concat_frame(frame_file_path, out_file, new_avg_framerate)
         else:
             shutil.copyfile(in_file, out_file)
             # just copy

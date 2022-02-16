@@ -77,8 +77,10 @@ The original APNG images comes with Alpha channel and typically has a transparen
 
 Method 1 is ~2.5x faster than method 2. But it cannot handle cases with `ya8` pixel format (Comes with Gray and Alpha channels, as I observed). So if the pixel format is `ya8`, method 2 will be used.
 
-## TODO
-
+## Known issues
+- FFmpeg (I'm using v5.0) may not correctly handle frame disposal in APNG sometimes. 
+For example, [this image](https://stickershop.line-scdn.net/stickershop/v1/sticker/16955051/IOS/sticker_animation@2x.png).
+If this happens, it's recommended to use [APNG Disassembler](http://apngdis.sourceforge.net/) to disassemble frames first.
 - Telegram has a limit on the size and length of video stickers, which is 256KiB and 3 seconds, respectively. (As of 01/02/2022)
 This script takes care of the length (by splitting the animation to individual frames and re-generate video using a larger framerate),
 but the size is not currently considered (In most cases size won't be a problem).
