@@ -10,6 +10,7 @@ class StickerType(Enum):
     POPUP_AND_SOUND_STICKER = 'popup&sound'
     SOUND = 'sound'
     MAIN_ANIMATION = 'main_animation'
+    MAIN_POPUP = 'main_popup'
 
 
 class StickerSetSource(Enum):
@@ -29,8 +30,9 @@ STICKER_URL_TEMPLATES = {
     StickerType.ANIMATED_STICKER: 'https://stickershop.line-scdn.net/stickershop/v1/sticker/{id}/IOS/sticker_animation@2x.png',
     StickerType.MAIN_ANIMATION: 'https://stickershop.line-scdn.net/stickershop/v1/product/{pack_id}/IOS/main_animation.png',
     StickerType.ANIMATED_AND_SOUND_STICKER: 'https://stickershop.line-scdn.net/stickershop/v1/sticker/{id}/IOS/sticker_animation@2x.png',
-    StickerType.POPUP_STICKER: 'https://stickershop.line-scdn.net/stickershop/v1/sticker/{id}/IOS/sticker_popup@2x.png',
-    StickerType.POPUP_AND_SOUND_STICKER: 'https://stickershop.line-scdn.net/stickershop/v1/sticker/{id}/IOS/sticker_popup@2x.png'
+    StickerType.POPUP_STICKER: 'https://stickershop.line-scdn.net/stickershop/v1/sticker/{id}/IOS/sticker_popup.png',
+    StickerType.POPUP_AND_SOUND_STICKER: 'https://stickershop.line-scdn.net/stickershop/v1/sticker/{id}/IOS/sticker_popup.png',
+    StickerType.MAIN_POPUP: 'https://stickershop.line-scdn.net/stickershop/v1/product/{pack_id}/IOS/main_popup.png',
 }
 FAKE_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.132 Safari/537.36'
