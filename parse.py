@@ -21,14 +21,14 @@ def parse_page_yabe(content: bytes):
     talk_icon = soup.select_one('div.stickerData div.talkIcon')
     move_icon = soup.select_one('div.stickerData div.moveIcon')
     popup_icon = soup.select_one('div.stickerData div.PopUpIcon')
-    if talk_icon and move_icon:
-        sticker_type = StickerType.ANIMATED_AND_SOUND_STICKER
-    elif talk_icon and popup_icon:
+    if talk_icon and popup_icon:
         sticker_type = StickerType.POPUP_AND_SOUND_STICKER
-    elif talk_icon:
-        sticker_type = StickerType.STATIC_WITH_SOUND_STICKER
     elif popup_icon:
         sticker_type = StickerType.POPUP_STICKER
+    elif talk_icon and move_icon:
+        sticker_type = StickerType.ANIMATED_AND_SOUND_STICKER
+    elif talk_icon:
+        sticker_type = StickerType.STATIC_WITH_SOUND_STICKER
     elif move_icon:
         sticker_type = StickerType.ANIMATED_STICKER
     title = soup.select_one('div.stickerData div.title')

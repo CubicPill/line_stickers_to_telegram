@@ -15,10 +15,14 @@ from spider import DownloadThread
 from utils import SET_URL_TEMPLATES, STICKER_URL_TEMPLATES, StickerType, StickerSetSource
 
 
-def prepare_video_sticker_icon(pack_id, temp_dir, output_path, proxies=None):
+def prepare_video_sticker_icon(pack_id, temp_dir, output_path, sticker_type, proxies=None):
     from spider import download_file
     from processing import process_video_or_regular_sticker_icon
-    url = STICKER_URL_TEMPLATES[StickerType.MAIN_ANIMATION].format(pack_id=pack_id)
+    if sticker_type in [StickerType.POPUP_AND_SOUND_STICKER,
+                        StickerType.POPUP_STICKER]:
+        url = STICKER_URL_TEMPLATES[StickerType.MAIN_POPUP].format(pack_id=pack_id)
+    else:
+        url = STICKER_URL_TEMPLATES[StickerType.MAIN_ANIMATION].format(pack_id=pack_id)
     download_path = os.path.join(temp_dir, 'mainimg.png')
 
     download_file(url, download_path, proxies)
@@ -184,6 +188,7 @@ def main():
         if option == ProcessOption.TO_WEBM:
             print('Downloading icon for webm stickers...')
             prepare_video_sticker_icon(args.id, sticker_temp_store_path, os.path.join(sticker_root_path, 'icon.webm'),
+                                       sticker_type,
                                        proxies)
         print('Process done!')
     # remove temp dir
