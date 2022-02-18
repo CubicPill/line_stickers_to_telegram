@@ -14,14 +14,18 @@ class KakaoWebpProcessor(Thread):
         Thread.__init__(self)
         self.task_queue: Queue = task_queue
         self.temp_dir = temp_dir
+        self.magick_bin = self.locate_magick_bin()
+
+    def locate_magick_bin(self):
+        return shutil.which('magick')
 
     def run(self) -> None:
 
         # first, use imagemagick to split frames
         # magick.exe .\4412296.emot_003.webp frames.png
         # use PIL to convert, ensure it's proper transparent png
-        # then get frame duration
-        # magick identify -format "%T," .\4412296.emot_003.webp
+        # then get frame duration, geometry, blending method
+        # magick identify -format "(%T,%g,%[webp:mux-blend])|" .\4412296.emot_003.webp
         # finally use ffmpeg to convert to webm
         # ffmpeg -f concat -i .\list.txt  out.webm
         # and it can then be fed into regular processor
@@ -62,20 +66,30 @@ class KakaoWebpProcessor(Thread):
             .run(quiet=True)
 
     def to_webm(self, uid, in_file, out_file):
+        # TODO: Correctly handle blending and disposal (Animated WebP and maybe APNG)
+        # TODO: check video length shrinking
         frame_working_dir_path = self.make_frame_temp_dir(uid)
         if not os.path.isdir(frame_working_dir_path):
             os.mkdir(frame_working_dir_path)
-        subprocess.call(['magick', in_file, os.path.join(frame_working_dir_path, 'frame-%d.png')], shell=True)
+        subprocess.call([self.magick_bin, in_file, os.path.join(frame_working_dir_path, 'frame-%d.png')], shell=False)
 
-        p = subprocess.Popen(['magick', 'identify', '-format', '%T,', in_file], stdin=None, stdout=subprocess.PIPE,
-                             stderr=subprocess.PIPE, shell=True)
+        p = subprocess.Popen([self.magick_bin, 'identify', '-format', r'%T,%W,%H,%X,%Y,%[webp:mux-blend]|', in_file],
+                             stdin=None, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, shell=False)
         out, err = p.communicate()
-        frame_data = out.decode().strip()
+        frame_data_str_output = out.decode().strip()[:-1]
 
-        durations = [round(int(f) / 100.0, 2) for f in frame_data.split(',') if f]
+        frame_data = list()
+        for fd in frame_data_str_output.split('|'):
+            duration, w, h, x, y, blend_method = fd.split(',')
+            duration = round(int(duration) / 100.0, 2)
+            w, h, x, y = [int(x) for x in [w, h, x, y]]
+            frame_data.append((duration, (w, h, x, y), blend_method))
+
+        durations = [f[0] for f in frame_data]
 
         frame_file_path = self.make_frame_file(durations, frame_working_dir_path)
-        avg_framerate = math.ceil((len(durations) + 1) / sum(durations) + 1)
+        avg_framerate = math.ceil((len(durations) + 1) / sum(durations))
         self.scale_and_concat_frame(frame_file_path, out_file, avg_framerate)
 
         return durations
@@ -93,10 +107,10 @@ class KakaoWebpProcessor(Thread):
                                               microseconds=duration_dt.microsecond).total_seconds()
 
         if duration_seconds > 3:
-            print('Speedup needed', uid)
+            # print('Speedup needed', uid)
             # need to speedup
             total_duration_sum = sum(durations)
-            print(f'Detected:{duration_seconds}s, calculated:{total_duration_sum}s')
+            # print(f'Detected:{duration_seconds}s, calculated:{total_duration_sum}s')
 
             factor = total_duration_sum / 3.0
             new_durations = [int(d / factor * 1000) / 1000 for d in durations]
