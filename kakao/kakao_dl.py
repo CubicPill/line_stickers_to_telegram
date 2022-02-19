@@ -54,11 +54,18 @@ def main():
                             help='Convert sticker (animated) to .mp4 video, with audio (if available). No scaling. Static stickers without audio cannot be converted to video',
                             action='store_true')
     arg_parser.add_argument('-p', '--path', type=str, help='Path to download the stickers')
+    arg_parser.add_argument('-d', '--debug', help='Enable debug mode', action='store_true')
+    arg_parser.add_argument('-t', '--threads', type=int, help='Thread number of downloader, default 4')
     args = arg_parser.parse_args()
 
     if not args.to_webm:
         print('Sorry, only webm is currently supported')
         raise NotImplementedError
+
+    # check dependency
+    if not shutil.which('magick'):
+        print('Error: ImageMagick is missing. Please install missing dependencies are re-run the program')
+        exit(1)
 
     proxies = {}
     if args.proxy:
@@ -120,16 +127,22 @@ def main():
 
         out_file = os.path.sep.join([sticker_root_path, f'{uid}.{suffix}'])
         process_queue.put_nowait((uid, in_pic, out_file))
+    num_threads = 4
+    if args.debug:
+        num_threads = 1
+    elif args.threads:
+        num_threads = args.threads
 
-    processor = [KakaoWebpProcessor(sticker_temp_store_path, process_queue) for _ in range(4)]
+    processor = [KakaoWebpProcessor(sticker_temp_store_path, process_queue) for _ in range(num_threads)]
     for p in processor:
         p.start()
     with tqdm(total=total_count) as bar:
         last = total_count
         while not process_queue.empty():
             bar.update(last - process_queue.qsize())
+            bar.refresh()
             last = process_queue.qsize()
-            time.sleep(0.1)
+            time.sleep(0.5)
         process_queue.join()
         bar.n = total_count
         bar.refresh()
@@ -137,7 +150,8 @@ def main():
 
     print('Process done!')
     # remove temp dir
-    shutil.rmtree(sticker_temp_store_path)
+    if not args.debug:
+        shutil.rmtree(sticker_temp_store_path)
 
 
 if __name__ == '__main__':

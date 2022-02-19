@@ -3,10 +3,12 @@ import math
 import os
 import shutil
 import subprocess
+import traceback
 from queue import Queue, Empty
 from threading import Thread
 
 import ffmpeg
+from PIL import Image
 
 
 class KakaoWebpProcessor(Thread):
@@ -22,13 +24,10 @@ class KakaoWebpProcessor(Thread):
     def run(self) -> None:
 
         # first, use imagemagick to split frames
-        # magick.exe .\4412296.emot_003.webp frames.png
         # use PIL to convert, ensure it's proper transparent png
-        # then get frame duration, geometry, blending method
-        # magick identify -format "(%T,%g,%[webp:mux-blend])|" .\4412296.emot_003.webp
+        # then get frame duration, geometry, blending method, disposal method
         # finally use ffmpeg to convert to webm
-        # ffmpeg -f concat -i .\list.txt  out.webm
-        # and it can then be fed into regular processor
+        # then it can then be fed into regular processor
 
         while not self.task_queue.empty():
             try:
@@ -39,6 +38,9 @@ class KakaoWebpProcessor(Thread):
                 interim_file_path = os.path.join(self.temp_dir, f'conv_{uid}.webm')
                 durations = self.to_webm(uid, in_file, interim_file_path)
                 self.check_and_adjust_duration(uid, durations, interim_file_path, out_file)
+            except Exception as e:
+                print(f'Exception while processing: {uid}, {in_file}:', e)
+                traceback.print_exc()
             finally:
                 self.task_queue.task_done()
 
@@ -53,6 +55,8 @@ class KakaoWebpProcessor(Thread):
             for i, d in enumerate(durations):
                 f.write(f"file 'frame-{i}.png'\n")
                 f.write(f'duration {d}\n')
+            # last frame need to be put twice, see: https://trac.ffmpeg.org/wiki/Slideshow
+            f.write(f"file 'frame-{len(durations) - 1}.png'\n")
         return os.path.join(frame_working_dir_path, 'frames.txt')
 
     def scale_and_concat_frame(self, frame_file_path, out_file, framerate):
@@ -61,43 +65,89 @@ class KakaoWebpProcessor(Thread):
         # https://bugs.telegram.org/c/14778
         ffmpeg.input(frame_file_path, format='concat') \
             .filter('scale', w='if(gt(iw,ih),512,-1)', h='if(gt(iw,ih),-1,512)') \
-            .output(out_file, r=framerate) \
+            .output(out_file, r=framerate, vsync=2) \
             .overwrite_output() \
             .run(quiet=True)
 
-    def to_webm(self, uid, in_file, out_file):
-        # TODO: Correctly handle blending and disposal (Animated WebP and maybe APNG)
-        # TODO: check video length shrinking
-        frame_working_dir_path = self.make_frame_temp_dir(uid)
+    def split_frames(self, in_file, frame_working_dir_path):
+        # split frames using imagemagick, and reconstruct frames based on disposal/blending
         if not os.path.isdir(frame_working_dir_path):
             os.mkdir(frame_working_dir_path)
         subprocess.call([self.magick_bin, in_file, os.path.join(frame_working_dir_path, 'frame-%d.png')], shell=False)
 
-        p = subprocess.Popen([self.magick_bin, 'identify', '-format', r'%T,%W,%H,%X,%Y,%[webp:mux-blend]|', in_file],
-                             stdin=None, stdout=subprocess.PIPE,
-                             stderr=subprocess.PIPE, shell=False)
+        p = subprocess.Popen(
+            [self.magick_bin, 'identify', '-format', r'%T,%W,%H,%w,%h,%X,%Y,%[webp:mux-blend],%D|', in_file],
+            stdin=None, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, shell=False)
         out, err = p.communicate()
         frame_data_str_output = out.decode().strip()[:-1]
-
+        image_w, image_h = 0, 0
         frame_data = list()
         for fd in frame_data_str_output.split('|'):
-            duration, w, h, x, y, blend_method = fd.split(',')
+            duration, cw, ch, w, h, x, y, blend_method, dispose_method = fd.split(',')
             duration = round(int(duration) / 100.0, 2)
-            w, h, x, y = [int(x) for x in [w, h, x, y]]
-            frame_data.append((duration, (w, h, x, y), blend_method))
+            cw, ch, w, h, x, y = [int(i) for i in [cw, ch, w, h, x, y]]
+            image_w, image_h = cw, ch
+            frame_data.append((duration, (w, h, x, y), blend_method, dispose_method))
+
+        # added for debugging purposes
+        try:
+            os.mkdir(os.path.join(frame_working_dir_path, 'raw'))
+        except:
+            pass
+        for i in os.listdir(frame_working_dir_path):
+            if i.startswith('frame-') and i.endswith('.png'):
+                shutil.copy(os.path.join(frame_working_dir_path, i), os.path.join(frame_working_dir_path, 'raw'))
+
+        # background color should be transparent
+        canvas = Image.new('RGBA', (image_w, image_h), (255, 255, 255, 0))
+
+        for i, d in enumerate(frame_data):
+            # since dispose_method applies to after displaying current frame,
+            # for this frame we need data from last frame
+            duration, (w, h, x, y), blend_method, _ = d
+            if i == 0:
+                dispose_method = 'None'
+                _w, _h, _x, _y = 0, 0, 0, 0  # make linter happy
+            else:
+                _, (_w, _h, _x, _y), _, dispose_method = frame_data[i - 1]
+
+            frame_file = os.path.join(frame_working_dir_path, f'frame-{i}.png')
+            frame_image = Image.open(frame_file).convert('RGBA')
+
+            if dispose_method == 'Background':
+                # last frame to be disposed to background color (transparent)
+                rect = Image.new('RGBA', (_w, _h), (255, 255, 255, 0))
+                canvas.paste(rect, (_x, _y, _w + _x, _h + _y))
+
+            # else do not dispose, do nothing
+            if blend_method == 'AtopPreviousAlphaBlend':  # do not blend
+                canvas.paste(frame_image, (x, y, w + x, h + y))
+            else:  # alpha blending
+                try:
+                    canvas.paste(frame_image, (x, y, w + x, h + y), frame_image)
+                except Exception as e:
+                    print(frame_file, e)
+                    raise Exception
+
+            canvas.save(os.path.join(frame_working_dir_path, f'frame-{i}.png'))
 
         durations = [f[0] for f in frame_data]
+        return durations
+
+    def to_webm(self, uid, in_file, out_file):
+
+        frame_working_dir_path = self.make_frame_temp_dir(uid)
+        durations = self.split_frames(in_file, frame_working_dir_path)
 
         frame_file_path = self.make_frame_file(durations, frame_working_dir_path)
-        avg_framerate = math.ceil((len(durations) + 1) / sum(durations))
+        avg_framerate = round((len(durations) + 2) / sum(durations), 3)
         self.scale_and_concat_frame(frame_file_path, out_file, avg_framerate)
 
         return durations
 
-    def check_and_adjust_duration(self, uid, durations, in_file, out_file):
-
-        # probe, ensure it's max 3 seconds
-        duration_str = ffmpeg.probe(in_file)['streams'][0]['tags']['DURATION']
+    def probe_duration(self, file):
+        duration_str = ffmpeg.probe(file)['streams'][0]['tags']['DURATION']
 
         hms, us = duration_str.split('.')
         us = us[:6]
@@ -105,20 +155,27 @@ class KakaoWebpProcessor(Thread):
         duration_dt = datetime.datetime.strptime(duration_str, '%H:%M:%S.%f')
         duration_seconds = datetime.timedelta(seconds=duration_dt.second,
                                               microseconds=duration_dt.microsecond).total_seconds()
+        return duration_seconds
+
+    def check_and_adjust_duration(self, uid, durations, in_file, out_file):
+
+        # probe, ensure it's max 3 seconds
+        duration_seconds = self.probe_duration(in_file)
 
         if duration_seconds > 3:
-            # print('Speedup needed', uid)
-            # need to speedup
-            total_duration_sum = sum(durations)
-            # print(f'Detected:{duration_seconds}s, calculated:{total_duration_sum}s')
+            factor = duration_seconds / 3.0
+            while True:
+                new_durations = [int(d / factor * 1000) / 1000 for d in durations]
+                new_avg_framerate = math.ceil((len(new_durations) + 2) / sum(new_durations) * 1000) / 1000
 
-            factor = total_duration_sum / 3.0
-            new_durations = [int(d / factor * 1000) / 1000 for d in durations]
-            new_avg_framerate = math.ceil((len(new_durations) + 1) / sum(new_durations))
-
-            frame_working_dir_path = self.make_frame_temp_dir(uid)
-            frame_file_path = self.make_frame_file(new_durations, frame_working_dir_path)
-            self.scale_and_concat_frame(frame_file_path, out_file, new_avg_framerate)
-        else:
+                frame_working_dir_path = self.make_frame_temp_dir(uid)
+                frame_file_path = self.make_frame_file(new_durations, frame_working_dir_path)
+                self.scale_and_concat_frame(frame_file_path, out_file, new_avg_framerate)
+                new_duration_seconds = self.probe_duration(file=out_file)
+                if new_duration_seconds > 3:
+                    factor = factor * 1.05
+                else:
+                    break
+        else:  # just copy
             shutil.copyfile(in_file, out_file)
-            # just copy
+
