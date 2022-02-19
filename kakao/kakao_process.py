@@ -1,5 +1,4 @@
 import datetime
-import math
 import os
 import shutil
 import subprocess
@@ -59,17 +58,24 @@ class KakaoWebpProcessor(Thread):
             f.write(f"file 'frame-{len(durations) - 1}.png'\n")
         return os.path.join(frame_working_dir_path, 'frames.txt')
 
-    def scale_and_concat_frame(self, frame_file_path, out_file, framerate):
+    def scale_and_concat_frame(self, frame_file_path, out_file):
         # framerate is needed here since telegram ios client will use framerate as play speed
-        # ffmpeg will use 25 by default, making it playing too fast
+        # in fact, framerate in webm should be informative only
+        # ffmpeg will use 25 by default
+        # so we set vsync=1 (cfr), let ffmpeg duplicate some frames to make ios happy
+        # this will cause file size to increase a bit, but it should be OK
+        # also 1/framerate seems to be the minimum unit of ffmpeg to encode frame duration
+        # so shouldn't set it too small - which will cause too much error
         # https://bugs.telegram.org/c/14778
+
+        framerate = 25
         ffmpeg.input(frame_file_path, format='concat') \
             .filter('scale', w='if(gt(iw,ih),512,-1)', h='if(gt(iw,ih),-1,512)') \
-            .output(out_file, r=framerate, vsync=2) \
+            .output(out_file, r=framerate, vsync=1) \
             .overwrite_output() \
             .run(quiet=True)
 
-    def split_frames(self, in_file, frame_working_dir_path):
+    def split_webp_frames(self, in_file, frame_working_dir_path):
         # split frames using imagemagick, and reconstruct frames based on disposal/blending
         if not os.path.isdir(frame_working_dir_path):
             os.mkdir(frame_working_dir_path)
@@ -99,9 +105,14 @@ class KakaoWebpProcessor(Thread):
             if i.startswith('frame-') and i.endswith('.png'):
                 shutil.copy(os.path.join(frame_working_dir_path, i), os.path.join(frame_working_dir_path, 'raw'))
 
+        self.process_blend_and_dispose(frame_data, frame_working_dir_path, image_h, image_w)
+
+        durations = [f[0] for f in frame_data]
+        return durations
+
+    def process_blend_and_dispose(self, frame_data, frame_working_dir_path, image_h, image_w):
         # background color should be transparent
         canvas = Image.new('RGBA', (image_w, image_h), (255, 255, 255, 0))
-
         for i, d in enumerate(frame_data):
             # since dispose_method applies to after displaying current frame,
             # for this frame we need data from last frame
@@ -132,17 +143,14 @@ class KakaoWebpProcessor(Thread):
 
             canvas.save(os.path.join(frame_working_dir_path, f'frame-{i}.png'))
 
-        durations = [f[0] for f in frame_data]
-        return durations
-
     def to_webm(self, uid, in_file, out_file):
 
         frame_working_dir_path = self.make_frame_temp_dir(uid)
-        durations = self.split_frames(in_file, frame_working_dir_path)
+        durations = self.split_webp_frames(in_file, frame_working_dir_path)
 
         frame_file_path = self.make_frame_file(durations, frame_working_dir_path)
-        avg_framerate = round((len(durations) + 2) / sum(durations), 3)
-        self.scale_and_concat_frame(frame_file_path, out_file, avg_framerate)
+        # avg_framerate = round((len(durations) + 2) / sum(durations), 3)
+        self.scale_and_concat_frame(frame_file_path, out_file)
 
         return durations
 
@@ -166,11 +174,10 @@ class KakaoWebpProcessor(Thread):
             factor = duration_seconds / 3.0
             while True:
                 new_durations = [int(d / factor * 1000) / 1000 for d in durations]
-                new_avg_framerate = math.ceil((len(new_durations) + 2) / sum(new_durations) * 1000) / 1000
-
+                # new_avg_framerate = math.ceil((len(new_durations) + 2) / sum(new_durations) * 1000) / 1000
                 frame_working_dir_path = self.make_frame_temp_dir(uid)
                 frame_file_path = self.make_frame_file(new_durations, frame_working_dir_path)
-                self.scale_and_concat_frame(frame_file_path, out_file, new_avg_framerate)
+                self.scale_and_concat_frame(frame_file_path, out_file)
                 new_duration_seconds = self.probe_duration(file=out_file)
                 if new_duration_seconds > 3:
                     factor = factor * 1.05
@@ -178,4 +185,3 @@ class KakaoWebpProcessor(Thread):
                     break
         else:  # just copy
             shutil.copyfile(in_file, out_file)
-
