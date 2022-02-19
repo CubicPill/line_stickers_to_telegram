@@ -22,6 +22,15 @@ Script to download stickers from line sticker store.
 - GIF ✅
 - Animated Sticker ❌
 - Video Sticker ✅
+
+## Requirements
+- FFmpeg 4.4.1 or later
+- ImageMagick 7.1.0 or later
+- [APNG Disassembler](http://apngdis.sourceforge.net/) 2.8 or later (optional)
+- See requirements.txt for python dependencies
+Install all requirements and make sure the executables are in your `PATH`.
+
+
 ## Usage
 ```
 download.py [-h] [--source SOURCE] [--lang LANG] [--proxy PROXY] [--no-scale] [--static] [--to-gif] [--to-webm] [--to-video] [-p PATH] [-t THREADS] id
