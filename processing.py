@@ -71,8 +71,8 @@ class ImageProcessorThread(Thread):
                 self.queue.task_done()
 
     def scale_image(self, in_file, out_file):
-        ffmpeg.input(in_file).filter('scale', w='if(gt(iw,ih),512,-1)', h='if(gt(iw,ih),-1,512)').output(out_file).run(
-            quiet=True)
+        ffmpeg.input(in_file).filter('scale', w='if(gt(iw,ih),512,-1)', h='if(gt(iw,ih),-1,512)').output(
+            out_file, pix_fmt='rgba').run(quiet=True)
 
     def remove_alpha_geq(self, in_stream):
         """
