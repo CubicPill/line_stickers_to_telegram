@@ -4,17 +4,19 @@ import os.path
 import queue
 from enum import Enum
 from threading import Thread
-
+import shutil
 import ffmpeg
 from PIL import Image
 
 
 class ProcessOption(Enum):
     NONE = 'none'
-    SCALE = 'scale'
+    SCALE_STATIC_512 = 'scale512'
+    SCALE_EMOJI_100 = 'scale100'
     TO_GIF = 'to_gif'
     TO_VIDEO = 'to_video'
     TO_WEBM = 'to_webm'
+    TO_WEBM_EMOJI = 'to_webm_emoji'
     ICON_WEBM = 'icon_webm'
     ICON_VIDEO_REGULAR = 'icon_video_regular'
 
@@ -26,6 +28,7 @@ class ProcessUnit:
         self.in_audio = in_audio
         self.out_file = out_file
         self.process_option = process_option
+        self.apngdis_bin = shutil.which('apngdis')
 
 
 class ImageProcessorThread(Thread):
@@ -45,12 +48,16 @@ class ImageProcessorThread(Thread):
                 if unit.process_option == ProcessOption.TO_VIDEO:
                     self.to_video(unit.in_img, unit.in_audio, unit.out_file)
                 else:
-                    if unit.process_option == ProcessOption.SCALE:
-                        self.scale_image(unit.in_img, unit.out_file)
+                    if unit.process_option == ProcessOption.SCALE_STATIC_512:
+                        self.scale_image(unit.in_img, unit.out_file, 512)
+                    elif unit.process_option == ProcessOption.SCALE_EMOJI_100:
+                        self.scale_image(unit.in_img, unit.out_file, 100)
                     elif unit.process_option == ProcessOption.TO_GIF:
                         self.to_gif(unit.in_img, unit.out_file)
                     elif unit.process_option == ProcessOption.TO_WEBM:
-                        self.to_webm(unit.id, unit.in_img, unit.out_file)
+                        self.to_webm(unit.id, unit.in_img, unit.out_file, False)
+                    elif unit.process_option == ProcessOption.TO_WEBM_EMOJI:
+                        self.to_webm(unit.id, unit.in_img, unit.out_file, True)
                     elif unit.process_option == ProcessOption.ICON_VIDEO_REGULAR:
                         self.process_video_or_regular_sticker_icon(unit.id, unit.in_img, unit.out_file)
                     elif unit.process_option == ProcessOption.NONE:
@@ -70,8 +77,9 @@ class ImageProcessorThread(Thread):
             finally:
                 self.queue.task_done()
 
-    def scale_image(self, in_file, out_file):
-        ffmpeg.input(in_file).filter('scale', w='if(gt(iw,ih),512,-1)', h='if(gt(iw,ih),-1,512)').output(
+    def scale_image(self, in_file, out_file, size):
+        assert size in [512, 100]
+        ffmpeg.input(in_file).filter('scale', w=f'if(gt(iw,ih),{size},-1)', h=f'if(gt(iw,ih),-1,{size})').output(
             out_file, pix_fmt='rgba').run(quiet=True)
 
     def remove_alpha_geq(self, in_stream):
@@ -79,7 +87,7 @@ class ImageProcessorThread(Thread):
         use geq filter to remove alpha
         just calculate the new color for each pixel on a white background
         slower than overlay method
-        cannot handle pal8
+        can handle pal8
         :param in_stream:
         :return:
         """
@@ -117,7 +125,11 @@ class ImageProcessorThread(Thread):
             pass
         return frame_tmp_path
 
-    def to_webm(self, uid, in_file, out_file):
+    def to_webm(self, uid, in_file, out_file, emoji):
+        if emoji:
+            scale_px = 100
+        else:
+            scale_px = 512
         try:
             pix_fmt = ffmpeg.probe(in_file)['streams'][0]['pix_fmt']
         except KeyError:
@@ -149,8 +161,8 @@ class ImageProcessorThread(Thread):
                 .run(quiet=True)
             in_file = new_in_file
 
-        video_input = ffmpeg.input(in_file, f='apng').filter('scale', w='if(gt(iw,ih),512,-1)',
-                                                             h='if(gt(iw,ih),-1,512)')
+        video_input = ffmpeg.input(in_file, f='apng').filter('scale', w=f'if(gt(iw,ih),{scale_px},-1)',
+                                                             h=f'if(gt(iw,ih),-1,{scale_px})')
 
         ffmpeg.output(video_input, out_file).overwrite_output().run(quiet=True)
 
