@@ -2,7 +2,7 @@ import re
 
 from bs4 import BeautifulSoup
 
-from utils import StickerType, StickerSetSource
+from utils import StickerSetSource, StickerType
 
 
 def parse_page(content: bytes, source: StickerSetSource):
@@ -90,8 +90,12 @@ def parse_page_line(content: bytes, emoji: bool):
         sticker_type = StickerType.STATIC_WITH_SOUND_STICKER
 
     title = soup.find('p', {'class': 'mdCMN38Item01Ttl'})
+    title2 = soup.find('h3')
     if title:
         title = title.text
+    elif title2:
+        print("Title not found, using the first h3 instead")
+        title = title2.text
     else:
         print(soup)
         raise Exception('Error: Title not found')

@@ -1,3 +1,4 @@
+import re
 from enum import Enum
 
 
@@ -21,7 +22,14 @@ class StickerSetSource(Enum):
     YABE = 'yabe'
     YABE_EMOJI = 'yabe_emoji'
 
+PACK_ID_REGEX=re.compile(r"/(\d+)/")
+SET_URL_REGEX = {
+    StickerSetSource.LINE: re.compile(r'https://store.line.me/stickershop/product/(\d+)/?(\w+)?'),
+    StickerSetSource.LINE_EMOJI: re.compile(r'https://store.line.me/emojishop/product/(\d+)/?(\w+)?'),
+    StickerSetSource.YABE: re.compile(r'https://yabeline.tw/Stickers_Data.php\?Number=(\d+)'),
+    StickerSetSource.YABE_EMOJI: re.compile(r'https://yabeline.tw/Emoji_Data.php\?Number=(\d+)')
 
+}
 SET_URL_TEMPLATES = {
     StickerSetSource.LINE: 'https://store.line.me/stickershop/product/{id}/{lang}?from=sticker',
     StickerSetSource.LINE_EMOJI: 'https://store.line.me/emojishop/product/{id}/{lang}',

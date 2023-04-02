@@ -12,7 +12,7 @@ from tqdm import tqdm
 from parse import parse_page
 from processing import ImageProcessorThread, ProcessOption, ProcessUnit
 from spider import DownloadThread
-from utils import SET_URL_TEMPLATES, STICKER_URL_TEMPLATES, StickerType, StickerSetSource
+from utils import PACK_ID_REGEX, SET_URL_REGEX, SET_URL_TEMPLATES, STICKER_URL_TEMPLATES, StickerSetSource, StickerType
 
 
 def prepare_video_sticker_icon(pack_id, temp_dir, output_path, sticker_type, proxies=None):
@@ -41,9 +41,9 @@ def prepare_regular_sticker_icon(pack_id, temp_dir, output_path, proxies=None):
 
 def main():
     arg_parser = argparse.ArgumentParser(description='Download stickers from line store')
-    arg_parser.add_argument('id', type=str, help='Product id of sticker set')
+    arg_parser.add_argument('id_url', type=str, help='Product id of sticker set or the URL')
     arg_parser.add_argument('--source', type=str, help='Source to get sticker set information. Default is "line"')
-    arg_parser.add_argument('--emoji-pack', action='store_true',
+    arg_parser.add_argument('--is-emoji', action='store_true',
                             help='Add this argument when the sticker pack to download is emoji')
     arg_parser.add_argument('--lang', type=str,
                             help='Language(Zone) to get sticker. Could be "en", "ja", "zh-Hant" and others. Default is "en"')
@@ -66,35 +66,66 @@ def main():
     arg_parser.add_argument('-t', '--threads', type=int, help='Thread number of downloader, default 4')
     args = arg_parser.parse_args()
     proxies = {}
-    pack_id = args.id
+    pack_id, url = None, None
+    is_emoji = args.is_emoji
+    if args.id_url.isdigit():
+        pack_id = args.id_url
+    else:
+        url = args.id_url
+        # input is url
+        # first see if the scheme matches
+        for _name, _regex in SET_URL_REGEX.items():
+            match = _regex.match(url)
+            if match:
+                print(f"URL is matched as: {_name}")
+                pack_id = match.group(1)
+                if _name in [StickerSetSource.LINE_EMOJI, StickerSetSource.YABE_EMOJI]:
+                    is_emoji = True
+                break
+        else:
+            print("URL is not matched as any known source, trying to download as a normal sticker set")
+
     if args.proxy:
         proxies['https'] = args.proxy
     thread_num = args.threads or 4
-    source = StickerSetSource.LINE
-    if args.source == 'yabe':
-        source = StickerSetSource.YABE
-    if args.emoji_pack:
-        source = {
-            StickerSetSource.LINE: StickerSetSource.LINE_EMOJI,
-            StickerSetSource.YABE: StickerSetSource.YABE_EMOJI
-        }[source]
-    lang = 'en'
-    if args.lang:
-        lang = args.lang
+    if pack_id:
+        source = StickerSetSource.LINE
+        if args.source == 'yabe':
+            source = StickerSetSource.YABE
+        if is_emoji:
+            source = {
+                StickerSetSource.LINE: StickerSetSource.LINE_EMOJI,
+                StickerSetSource.YABE: StickerSetSource.YABE_EMOJI
+            }[source]
+        lang = 'en'
+        if args.lang:
+            lang = args.lang
 
-    r = requests.get(SET_URL_TEMPLATES[source].format(id=pack_id, lang=lang), proxies=proxies)
-    real_pack_id, title, id_list, sticker_type = parse_page(r.content, source)
-    if source == StickerSetSource.YABE_EMOJI:
-        if real_pack_id:
-            pack_id = real_pack_id
-            print(f'Successfully got real id from Yabe: {real_pack_id}')
+        r = requests.get(SET_URL_TEMPLATES[source].format(id=pack_id, lang=lang), proxies=proxies)
+        real_pack_id, title, id_list, sticker_type = parse_page(r.content, source)
+        if source == StickerSetSource.YABE_EMOJI:
+            if real_pack_id:
+                pack_id = real_pack_id
+                print(f'Successfully got real id from Yabe: {real_pack_id}')
+            else:
+                print('Error: Yabe emoji real id lookup failed!')
+                exit(1)
+    else:
+        # url
+        r = requests.get(url, proxies=proxies)
+        real_pack_id, title, id_list, sticker_type = parse_page(r.content, StickerSetSource.LINE)
+        match = PACK_ID_REGEX.search(url)
+        if match:
+            print("Possible pack id for this pack:", match.group(1))
+            pack_id = match.group(1)
         else:
-            print('Error: Yabe emoji real id lookup failed!')
-            exit(1)
+            print("Can't guess pack id, using 0")
+            pack_id = 0
     if args.static:
         sticker_type = StickerType.STATIC_STICKER
     title = '_'.join(re.sub(r'[/:*?"<>|]', '', title).split())
     print('Title:', title)
+    print('Pack ID:', pack_id)
     print('Sticker Type:', sticker_type.name)
     print('Total number of stickers:', len(id_list))
 
@@ -111,7 +142,7 @@ def main():
     if not os.path.isdir(sticker_raw_dl_path):
         os.mkdir(sticker_raw_dl_path)
     print('Downloading to:', sticker_root_path)
-    if args.emoji_pack:
+    if is_emoji:
         option = ProcessOption.SCALE_EMOJI_100
     else:
         option = ProcessOption.SCALE_STATIC_512
@@ -216,7 +247,7 @@ def main():
             bar.clear()
 
         if option == ProcessOption.TO_WEBM:
-            if args.emoji_pack:
+            if is_emoji:
                 # emoji pack don't have an icon
                 print('No icon for animated emoji stickers')
             else:

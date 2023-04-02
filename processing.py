@@ -126,6 +126,9 @@ class ImageProcessorThread(Thread):
         return frame_tmp_path
 
     def to_webm(self, uid, in_file, out_file, emoji):
+        # TODO verify the framerate
+        # kakao and here both split and rejoin frames
+        # however from line apng there's no issue with play speed -p
         if emoji:
             scale_px = 100
         else:
