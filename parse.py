@@ -2,20 +2,21 @@ import re
 
 from bs4 import BeautifulSoup
 
-from utils import StickerSetSource, StickerType
+from utils import SourceUrlType, StickerType
 
 
-def parse_page(content: bytes, source: StickerSetSource):
+# begin deprecated
+def parse_page(content: bytes, source: SourceUrlType):
     parser = {
-        StickerSetSource.YABE: parse_page_yabe,
-        StickerSetSource.YABE_EMOJI: parse_page_yabe,
-        StickerSetSource.LINE: parse_page_line,
-        StickerSetSource.LINE_EMOJI: parse_page_line
+        SourceUrlType.YABE: parse_page_yabe,
+        SourceUrlType.YABE_EMOJI: parse_page_yabe,
+        SourceUrlType.LINE: parse_page_line,
+        SourceUrlType.LINE_EMOJI: parse_page_line
     }
     if source not in parser.keys():
         raise ValueError
     emoji = False
-    if source in [StickerSetSource.LINE_EMOJI, StickerSetSource.YABE_EMOJI]:
+    if source in [SourceUrlType.LINE_EMOJI, SourceUrlType.YABE_EMOJI]:
         emoji = True
     return parser[source](content, emoji)
 
@@ -23,7 +24,7 @@ def parse_page(content: bytes, source: StickerSetSource):
 def parse_page_yabe(content: bytes, emoji: bool):
     real_pack_id = 0
     if emoji:
-        sticker_type = StickerType.STICON
+        sticker_type = StickerType.EMOJI
     else:
         sticker_type = StickerType.STATIC_STICKER
     soup = BeautifulSoup(content, 'html5lib')
@@ -40,7 +41,7 @@ def parse_page_yabe(content: bytes, emoji: bool):
         sticker_type = StickerType.STATIC_WITH_SOUND_STICKER
     elif move_icon:
         if emoji:
-            sticker_type = StickerType.ANIMATED_STICON
+            sticker_type = StickerType.ANIMATED_EMOJI
         else:
             sticker_type = StickerType.ANIMATED_STICKER
     title = soup.select_one('div.stickerData div.title')
@@ -71,7 +72,7 @@ def parse_page_yabe(content: bytes, emoji: bool):
 
 def parse_page_line(content: bytes, emoji: bool):
     if emoji:
-        sticker_type = StickerType.STICON
+        sticker_type = StickerType.EMOJI
     else:
         sticker_type = StickerType.STATIC_STICKER
     soup = BeautifulSoup(content, 'html5lib')
@@ -81,7 +82,7 @@ def parse_page_line(content: bytes, emoji: bool):
         sticker_type = StickerType.POPUP_AND_SOUND_STICKER
     elif soup.find('span', {'class': 'MdIcoPlay_b'}):
         if emoji:
-            sticker_type = StickerType.ANIMATED_STICON
+            sticker_type = StickerType.ANIMATED_EMOJI
         else:
             sticker_type = StickerType.ANIMATED_STICKER
     elif soup.find('span', {'class': 'MdIcoFlash_b'}):
@@ -113,3 +114,4 @@ def parse_page_line(content: bytes, emoji: bool):
     id_list = list(set(id_list))
     # for line id, conversion is not needed, real_id returns 0
     return 0, title, id_list, sticker_type
+# end deprecated
