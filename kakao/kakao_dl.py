@@ -41,7 +41,7 @@ def get_sticker_icon_and_name(url):
 
 def main():
     arg_parser = argparse.ArgumentParser(description='Download stickers from Kakao store')
-    arg_parser.add_argument('url', type=str, help='URL of sticker set')
+    arg_parser.add_argument('url', type=str, help='URL of sticker set (Kakao share link)')
     arg_parser.add_argument('--proxy', type=str, help='HTTPS proxy, addr:port')
     arg_parser.add_argument('--no-processing', help='No processing', action='store_true')
     arg_parser.add_argument('--static',
@@ -71,7 +71,8 @@ def main():
     if args.proxy:
         proxies['https'] = args.proxy
 
-    sticker_url = args.url
+    sticker_url = args.url.strip()
+    assert sticker_url.startswith('https://emoticon.kakao.com/items'), 'Invalid URL'
 
     sticker_id, sticker_title = get_sticker_id_and_title(sticker_url)
     sticker_icon_url, sticker_name = get_sticker_icon_and_name(sticker_url)
