@@ -6,29 +6,34 @@ import shutil
 import subprocess
 import traceback
 from enum import Enum
-from threading import Thread
+from threading import Lock, Thread
 
 import ffmpeg
 
 from utils import StickerType, sticker_type_properties
 
-MAGICK_BIN = shutil.which('magick')
+_print_lock = Lock()
+_MAGICK_BIN = shutil.which('magick')
+GIF_ALPHA_THRESHOLD = 63
+WEBM_SIZE_KB_MAX = 256
+WEBM_DURATION_SEC_MAX = 3
 
 
 class OutputFormat(Enum):
     # this will also be the file extension
     GIF = 'gif'
     WEBM = 'webm'
-    VIDEO = 'mp4'
+    MP4 = 'mp4'
     APNG = 'png'
 
 
 class Operation(Enum):
     SCALE = 'scale'
     OVERLAY = 'overlay'
+    REMOVE_ALPHA = 'remove_alpha'
     TO_GIF = 'to_gif'
     TO_WEBM = 'to_webm'
-    # TO_VIDEO = 'to_video'
+    TO_MP4 = 'to_mp4'
 
 
 class ProcessTask:
@@ -51,6 +56,13 @@ class ImageProcessorThread(Thread):
         self.sticker_type = sticker_type
         self.output_format = output_format
         self._current_sticker_id = None
+        (
+            self._sticker_has_animation,
+            self._sticker_has_sound,
+            self._sticker_has_popup,
+            self._sticker_has_text_overlay,
+            self._sticker_is_emoji
+        ) = sticker_type_properties(self.sticker_type)
 
     def run(self):
         while not self.queue.empty():
@@ -67,38 +79,40 @@ class ImageProcessorThread(Thread):
                         self.scale_image(curr_in, curr_out, task.scale_px)
                     elif op == Operation.OVERLAY:
                         self.overlay_sticker_message(curr_in, task.in_overlay, curr_out)
+                    elif op == Operation.REMOVE_ALPHA:
+                        self.remove_alpha(curr_in, curr_out)
                     elif op == Operation.TO_GIF:
                         self.to_gif(curr_in, curr_out)
                     elif op == Operation.TO_WEBM:
                         self.to_webm(curr_in, curr_out)
-                    # elif op == Operation.TO_VIDEO:
-                    #     self.to_video()
+                    elif op == Operation.TO_MP4:
+                        self.to_video(curr_in, task.in_audio, curr_out)
                     curr_in = curr_out
                 shutil.copy(curr_in, task.result_path)
             except ffmpeg.Error as e:
-                print('Error occurred while processing', e, task.sticker_id)
-                print('------stdout------')
-                print(e.stdout.decode())
-                print('------end------')
-                print('------stderr------')
-                print(e.stderr.decode())
-                print('------end------')
-                traceback.print_exc()
+                with _print_lock:
+                    print('Error occurred while processing', e, task.sticker_id)
+                    print('------stdout------')
+                    print(e.stdout.decode())
+                    print('------end------')
+                    print('------stderr------')
+                    print(e.stderr.decode())
+                    print('------end------')
+                    traceback.print_exc()
             finally:
                 self.queue.task_done()
 
     def overlay_sticker_message(self, in_img, in_overlay, out_file):
         # overlay in_overlay on in_img
-        subprocess.call([MAGICK_BIN, in_img, in_overlay, '-gravity', 'center', '-composite', out_file])
+        subprocess.call([_MAGICK_BIN, in_img, in_overlay, '-gravity', 'center', '-composite', out_file])
 
     def scale_image(self, in_file, out_file, size):
-        has_animation, _, _, _, _ = sticker_type_properties(self.sticker_type)
-        if has_animation:
+        if self._sticker_has_animation:
             ffmpeg.input(in_file, f='apng').filter('scale', w=f'if(gt(iw,ih),{size},-1)',
                                                    h=f'if(gt(iw,ih),-1,{size})').output(
                     out_file, pix_fmt='rgba', f='apng').run(quiet=True)
         else:
-            subprocess.call([MAGICK_BIN, in_file, '-resize', f'{size}x{size}', out_file])
+            subprocess.call([_MAGICK_BIN, in_file, '-resize', f'{size}x{size}', out_file])
 
     def _make_frame_temp_dir(self, uid):
         frame_tmp_path = os.path.join(self.temp_dir, uid)
@@ -162,8 +176,7 @@ class ImageProcessorThread(Thread):
     def cap_webm_duration_and_size(self, in_webm, in_apng, out_file):
         # probe, ensure it's max 3 seconds
         # length is not accurate in apng, must probe converted webm
-        SIZE_KB_MAX = 256
-        DURATION_SEC_MAX = 3
+
         size_kb = os.path.getsize(in_webm) / 1024
         duration_str = ffmpeg.probe(in_webm)['streams'][0]['tags']['DURATION']
         framerate_str = ffmpeg.probe(in_webm)['streams'][0]['r_frame_rate']
@@ -177,7 +190,7 @@ class ImageProcessorThread(Thread):
                                               microseconds=duration_dt.microsecond).total_seconds()
         total_frames = round(duration_seconds * framerate)
 
-        if duration_seconds > DURATION_SEC_MAX:
+        if duration_seconds > WEBM_DURATION_SEC_MAX:
             # need to speedup: split image to frames and re-generate
 
             new_framerate = math.ceil((total_frames + 1) / 3)
@@ -193,40 +206,37 @@ class ImageProcessorThread(Thread):
         return False
 
     def remove_alpha(self, in_file, out_file):
-        ffmpeg.input(in_file, f='apng').filter('geq',
-                                               r='(r(X,Y)*alpha(X,Y)/255)+(255-alpha(X,Y))',
-                                               g='(g(X,Y)*alpha(X,Y)/255)+(255-alpha(X,Y))',
-                                               b='(b(X,Y)*alpha(X,Y)/255)+(255-alpha(X,Y))',
-                                               a=255).output(out_file, f='apng').overwrite_output().run(quiet=True)
+        if self._sticker_has_animation:
+            ffmpeg.input(in_file, f='apng').filter('geq',
+                                                   r='(r(X,Y)*alpha(X,Y)/255)+(255-alpha(X,Y))',
+                                                   g='(g(X,Y)*alpha(X,Y)/255)+(255-alpha(X,Y))',
+                                                   b='(b(X,Y)*alpha(X,Y)/255)+(255-alpha(X,Y))',
+                                                   a=255).output(out_file, f='apng').overwrite_output().run(quiet=True)
+        else:
+            # use magick for static image
+            subprocess.call(['magick', 'convert', in_file, '-background', 'white', '-alpha', 'remove', '-alpha', 'off',
+                             out_file])
 
     def to_gif(self, in_file, out_file):
-        noalpha_interim_apng = os.path.join(self.temp_dir, f'{self._current_sticker_id}.noalpha.png')
-        self.remove_alpha(in_file, noalpha_interim_apng)
-
-        palette_stream = ffmpeg.input(noalpha_interim_apng, f='apng').filter('palettegen')
-        ffmpeg.filter([ffmpeg.input(noalpha_interim_apng, f='apng'), palette_stream], 'paletteuse') \
+        palette_stream = ffmpeg.input(in_file, f='apng').filter('palettegen', reserve_transparent=1)
+        ffmpeg.filter([ffmpeg.input(in_file, f='apng'), palette_stream], 'paletteuse',
+                      alpha_threshold=GIF_ALPHA_THRESHOLD) \
             .output(out_file, f='gif') \
             .overwrite_output() \
             .run(quiet=True)
 
     def to_video(self, in_pic, in_audio, out_file):
-        raise NotImplementedError
-        # disable for now
-        # streams = list()
-        # pix_fmt = ffmpeg.probe(in_pic)['streams'][0]['pix_fmt']
-        # in_pic_stream = ffmpeg.input(in_pic, f='apng')
-        # video_output = self.remove_alpha(in_pic_stream, pix_fmt) \
-        #     .filter('scale',
-        #             w='trunc(iw/2)*2',
-        #             h='trunc(ih/2)*2'  # enable H.264
-        #             )
-        #
-        # streams.append(video_output)
-        # if in_audio:
-        #     audio_input = ffmpeg.input(in_audio)
-        #     streams.append(audio_input)
-        # ffmpeg.output(*streams, out_file, pix_fmt='yuv420p', movflags='faststart') \
-        #     .overwrite_output().run(quiet=True)
+        streams = []
+        in_pic_stream = ffmpeg.input(in_pic, f='apng').filter('pad',
+                                                              w='ceil(iw/2)*2',
+                                                              h='ceil(ih/2)*2'  # make w,h divisible b 2, enable H.264
+                                                              )
+        streams.append(in_pic_stream)
+        if in_audio:
+            audio_input = ffmpeg.input(in_audio)
+            streams.append(audio_input)
+        ffmpeg.output(*streams, out_file, pix_fmt='yuv420p', movflags='faststart') \
+            .overwrite_output().run(quiet=True)
 
 
 def process_sticker_icon(in_file, out_file):

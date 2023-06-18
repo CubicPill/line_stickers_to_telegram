@@ -19,6 +19,9 @@ from utils import MESSAGE_STICKER_OVERLAY_DEFAULT, STICKER_SET_URL_REGEX, Source
 from webreq import MultiThreadDownloader, get_metadata, get_real_pack_id_from_yabe_emoji, \
     get_sticker_archive, get_sticker_info_from_line_page
 
+err_print = print
+norm_print = print
+
 
 def main():
     arg_parser = argparse.ArgumentParser(description='Download stickers from line store')
@@ -37,14 +40,21 @@ def main():
     arg_parser.add_argument('--proxy', type=str, help='proxy, http(s)://addr:port')
     arg_parser.add_argument('-y', action='store_true', help='Skip confirmation')
     arg_parser.add_argument('--redownload', action='store_true', help='Redownload stickers even if they exist')
-
+    arg_parser.add_argument('--no-subdir', action='store_true',
+                            help='Do not create subdirectory for different output formats')
+    arg_parser.add_argument('--show', action='store_true', help='Open the download/output directory after download')
+    arg_parser.add_argument('-q', '--quiet', action='store_true', help='Do not print information and progress bar')
     # conversion options
+
+    # webm won't have audio track
     arg_parser.add_argument('--output-fmt', type=str, help='Output format', default='none',
-                            choices=['none', 'png', 'gif', 'webm', 'video'])
-    # arg_parser.add_argument('--output-fmt', type=str, help='Output format', default='apng',
-    #                         choices=['apng', 'gif', 'webm', 'video'])
+                            choices=['none', 'png', 'gif', 'webm', 'mp4', 'qq-auto'])
+
     arg_parser.add_argument('--scale', help='Scale static stickers to 512*512, preserving aspect ratio',
                             action='store_true')
+
+    # works for gif, png and webm. For mp4 video, alpha is always removed
+    arg_parser.add_argument('--remove-alpha', help='Replace transparent background with white', action='store_true')
 
     # for message stickers only
     arg_parser.add_argument('--no-default-txt-overlay', action='store_true',
@@ -57,41 +67,53 @@ def main():
 
     # check dependency
     if not shutil.which('magick'):
-        print('Error: ImageMagick is missing. Please install missing dependencies are re-run the program')
+        err_print('Error: ImageMagick is missing. Please install missing dependencies are re-run the program')
         exit(1)
 
     sticker_data_root_dir = os.path.join(os.getcwd(), 'sticker_dl')
     if not os.path.exists(sticker_data_root_dir):
         os.mkdir(sticker_data_root_dir)
 
-    sticker_output_root_dir = os.path.join(os.getcwd(), 'sticker_out')
-    if not os.path.exists(sticker_output_root_dir):
-        os.mkdir(sticker_output_root_dir)
+    default_sticker_output_root_dir = os.path.join(os.getcwd(), 'sticker_out')
+    if not os.path.exists(default_sticker_output_root_dir):
+        os.mkdir(default_sticker_output_root_dir)
 
+    # gather arguments
     proxies = {}
     if args.proxy:
         proxies['https'] = args.proxy
     webreq.set_proxy(proxies)
     thread_num = args.threads or 4
-
     lang = args.lang
-
     dl_type = args.type
+    if_remove_alpha = args.remove_alpha
+    id_url = args.id_url.strip()
+    if_scale = args.scale
+    output_fmt = args.output_fmt
+    no_default_txt_overlay = args.no_default_txt_overlay
+    skip_confirmation = args.y
+    no_sub_dir = args.no_subdir
+    open_folder = args.show
+    quiet = args.quiet
+    if quiet:
+        global norm_print
+        norm_print = lambda *args, **kwargs: None
+        skip_confirmation = True
 
     # check if input is id or url
-    if 'http' not in args.id_url:
-        pack_id = args.id_url.strip()
+    if 'http' not in id_url:
+        pack_id = id_url
         is_emoji = dl_type == 'emoji'
         if not is_emoji and len(pack_id) >= 24:
-            print(
+            err_print(
                     'WARNING: You probably want to download an emoji pack, but the sticker type is not specified as emoji.')
     else:
         # input is url
         # extract pack id from url
         for _type, (_regex, _emoji_flag) in STICKER_SET_URL_REGEX.items():
-            match = _regex.match(args.id_url)
+            match = _regex.match(id_url)
             if match:
-                print(f"URL is matched as: {_type}")
+                norm_print(f"URL is matched as: {_type}")
                 pack_id = match.group(1)
                 is_emoji = _emoji_flag
 
@@ -100,7 +122,7 @@ def main():
                     pack_id = get_real_pack_id_from_yabe_emoji(pack_id)
                 break
         else:
-            print("URL is not matched as any known source! Please double check the url")
+            norm_print("URL is not matched as any known source! Please double check the url")
             sys.exit(1)
 
     # from here, pack_id should be ready. Check if the sticker set has already been downloaded
@@ -112,14 +134,14 @@ def main():
                 if os.path.exists(os.path.join(sticker_data_root_dir, d, 'info.json')):
                     with open(os.path.join(sticker_data_root_dir, d, 'info.json'), 'r', encoding='utf-8') as f:
                         pack_info = json.load(f)
-                        print(f"Found local metadata for pack {pack_id}!")
+                        norm_print(f"Found local metadata for pack {pack_id}!")
                         break
     else:
         # get metadata
         try:
             metadata = get_metadata(pack_id, is_emoji)
         except FileNotFoundError:
-            print(f'FAILED: Cannot find sticker set {pack_id} with type "{dl_type}"!')
+            err_print(f'FAILED: Cannot find sticker set {pack_id} with type "{dl_type}"!')
             sys.exit(1)
         title, author_name, author_id = get_sticker_info_from_line_page(pack_id, is_emoji, lang)
         if is_emoji:
@@ -151,34 +173,34 @@ def main():
     sticker_count = len(id_list)
     has_animation, has_sound, has_popup, has_text_overlay, is_emoji = sticker_type_properties(sticker_type)
     scale_px = 0
-    if args.scale and not has_animation:
+    if if_scale and not has_animation:
         scale_px = 512
-    elif args.output_fmt == 'webm':
+    elif output_fmt == 'webm':
         if is_emoji:
             scale_px = 100
         else:
             scale_px = 512
-    print('-----------------Sticker pack info:-----------------')
-    print('Title:', title)
-    print('Pack ID:', pack_id)
-    print('Sticker Type:', sticker_type.name)
-    print('Total number of stickers:', sticker_count)
-    if args.output_fmt == 'none':
-        print('Output format: <Download Only>')
+    norm_print('-----------------Sticker pack info:-----------------')
+    norm_print('Title:', title)
+    norm_print('Pack ID:', pack_id)
+    norm_print('Sticker Type:', sticker_type.name)
+    norm_print('Total number of stickers:', sticker_count)
+    if output_fmt == 'none':
+        norm_print('Output format: <Download Only>')
     else:
-        print('Output format:', args.output_fmt)
+        norm_print('Output format:', output_fmt)
     if scale_px:
-        print('Scale:', f'{scale_px}*{scale_px}px')
+        norm_print('Scale:', f'{scale_px}*{scale_px}px')
     if sticker_type == StickerType.MESSAGE_STICKER:
-        print('Default text overlay:', not args.no_default_txt_overlay)
-    print('----------------------------------------------------')
-    if not args.y:
+        norm_print('Default text overlay:', not no_default_txt_overlay)
+    norm_print('----------------------------------------------------')
+    if not skip_confirmation:
         confirm = input('Do you wish to continue? Y/n: ')
         if confirm.lower() == 'n':
-            print('Aborting...')
+            norm_print('Aborting...')
             sys.exit(0)
         elif confirm and confirm.lower() != 'y':
-            print('Invalid input. Aborting...')
+            norm_print('Invalid input. Aborting...')
             sys.exit(1)
 
     # create folders
@@ -200,21 +222,21 @@ def main():
     download_archive = True
     if os.path.exists(archive_path):
         # verify integrity using md5
-        print('Archive exists. Verifying integrity... ', end='')
+        norm_print('Archive exists. Verifying integrity... ', end='')
         with open(archive_path, 'rb') as f:
             archive_content = f.read()
         archive_md5 = hashlib.md5(archive_content).hexdigest()
         if archive_md5 == pack_info['archive_md5']:
-            print('OK!')
+            norm_print('OK!')
             download_archive = False
         else:
-            print('Verification failed! Redownload...')
+            norm_print('Verification failed! Redownload...')
             os.remove(archive_path)
     if download_archive:
         # download sticker pack
-        print('Downloading sticker pack archive... ', end='')
+        norm_print('Downloading sticker pack archive... ', end='')
         archive_content = get_sticker_archive(pack_id, sticker_type)
-        print('Complete!')
+        norm_print('Complete!')
         # save archive and unzip to temp folder
         with open(archive_path, 'wb') as f:
             f.write(archive_content)
@@ -230,10 +252,10 @@ def main():
     if not os.path.isdir(sticker_raw_path):
         os.mkdir(sticker_raw_path)
 
-        print('Extracting archive... ', end='')
+        norm_print('Extracting archive... ', end='')
         with zipfile.ZipFile(archive_path, 'r') as zip_ref:
             zip_ref.extractall(sticker_temp_store_extracted_zip_path)
-        print('Complete!')
+        norm_print('Complete!')
 
         # copy useful files to raw folder and rename
         if is_emoji:
@@ -292,14 +314,14 @@ def main():
         # cleanup temp folder
         shutil.rmtree(sticker_temp_store_extracted_zip_path)
     else:
-        print('Sticker pack already exists, skip unarchive...')
+        norm_print('Sticker pack already exists, skip unarchive...')
 
     # for message sticker, download default overlay message in advance
     if sticker_type == StickerType.MESSAGE_STICKER:
         default_overlay_dl_path = os.path.join(sticker_dl_path, 'default_overlay')
         if not os.path.isdir(default_overlay_dl_path):
             os.mkdir(default_overlay_dl_path)
-            print('Downloading default overlay message for message sticker... ')
+            norm_print('Downloading default overlay message for message sticker... ')
             download_queue = Queue()
             download_completed_queue = Queue()
             downloader = [MultiThreadDownloader(download_queue, download_completed_queue) for _ in
@@ -311,52 +333,64 @@ def main():
                 download_queue.put((sticker_id, url, filename))
             for d in downloader:
                 d.start()
-
-            with tqdm(total=sticker_count) as bar:
-                last = sticker_count
-                while not download_queue.empty():
-                    bar.update(last - download_queue.qsize())
-                    last = download_queue.qsize()
-                    time.sleep(0.1)
+            if not quiet:
+                with tqdm(total=sticker_count) as bar:
+                    last = sticker_count
+                    while not download_queue.empty():
+                        bar.update(last - download_queue.qsize())
+                        last = download_queue.qsize()
+                        time.sleep(0.1)
+                    download_queue.join()
+                    bar.n = sticker_count
+                    bar.refresh()
+                    bar.clear()
+            else:
                 download_queue.join()
-                bar.n = sticker_count
-                bar.refresh()
-                bar.clear()
 
-            print('Message sticker default overlay download done!')
+            norm_print('Message sticker default overlay download done!')
         else:
-            print('Message sticker default overlay already exists, skip download...')
+            norm_print('Message sticker default overlay already exists, skip download...')
         # copy default overlay to sticker pack folder
         shutil.copytree(default_overlay_dl_path, os.path.join(sticker_raw_path, 'default_overlay'), dirs_exist_ok=True)
-    if args.output_fmt == 'none':
-        print('No processing will be done, exit...')
+    if output_fmt == 'none':
+        norm_print('No processing will be done, exit...')
+        if open_folder:
+            os.startfile(sticker_pack_root)
         sys.exit(0)
 
     # determine process option
     # for line, all stickers are png/apng
-    if args.output_fmt == 'png':
+    if output_fmt == 'qq-auto':
+        if has_animation:
+            output_format = OutputFormat.GIF
+        else:
+            output_format = OutputFormat.APNG
+    elif output_fmt == 'png':
         output_format = OutputFormat.APNG
-    elif args.output_fmt == 'gif':
+    elif output_fmt == 'gif':
         output_format = OutputFormat.GIF
-    elif args.output_fmt == 'webm':
+    elif output_fmt == 'webm':
         output_format = OutputFormat.WEBM
-    elif args.output_fmt == 'video':
-        output_format = OutputFormat.VIDEO
+    elif output_fmt == 'video':
+        output_format = OutputFormat.MP4
 
     else:
-        print(f'FAILED: Invalid output format {args.output_fmt}!')
+        err_print(f'FAILED: Invalid output format {output_fmt}!')
         sys.exit(1)
 
     process_queue = Queue()
-    sticker_output_path = os.path.join(sticker_output_root_dir, f'{sanitized_title}({pack_id})',
-                                       f'{output_format.value}')
+    if no_sub_dir:
+        sticker_output_path = os.path.join(default_sticker_output_root_dir, f'{sanitized_title}({pack_id})')
+    else:
+        sticker_output_path = os.path.join(default_sticker_output_root_dir, f'{sanitized_title}({pack_id})',
+                                           f'{output_format.value}')
     if scale_px:
         sticker_output_path += f'_scale_{scale_px}'
     if not os.path.isdir(sticker_output_path):
         os.makedirs(sticker_output_path)
 
     if not has_animation and output_format != OutputFormat.APNG:
-        print('ERROR: Sticker pack does not have animation, only PNG output is supported!')
+        err_print('ERROR: Sticker pack does not have animation, only PNG output is supported!')
         sys.exit(1)
 
     for sticker_id in id_list:
@@ -379,16 +413,19 @@ def main():
         operations = []
 
         # order of operation: overlay, scale, other conversions (gif, webm, video)
-        if has_text_overlay and not args.no_default_txt_overlay:
+        if has_text_overlay and not no_default_txt_overlay:
             operations.append(Operation.OVERLAY)
         if scale_px:
             operations.append(Operation.SCALE)
+        if if_remove_alpha:
+            operations.append(Operation.REMOVE_ALPHA)
+
         if output_format == OutputFormat.GIF:
             operations.append(Operation.TO_GIF)
         elif output_format == OutputFormat.WEBM:
             operations.append(Operation.TO_WEBM)
-        # elif output_format==OutputFormat.VIDEO:
-        #     operations.append(Operation.TO_VIDEO)
+        elif output_format == OutputFormat.MP4:
+            operations.append(Operation.TO_MP4)
 
         process_queue.put_nowait(
                 ProcessTask(sticker_id, in_pic, in_audio, in_overlay, scale_px, operations, result_output))
@@ -397,26 +434,29 @@ def main():
                  range(8)]
     for p in processor:
         p.start()
-    with tqdm(total=sticker_count) as bar:
-        last = sticker_count
-        while not process_queue.empty():
-            qsize = process_queue.qsize()
-            bar.update(last - qsize)
+    if not quiet:
+        with tqdm(total=sticker_count) as bar:
+            last = sticker_count
+            while not process_queue.empty():
+                qsize = process_queue.qsize()
+                bar.update(last - qsize)
+                bar.refresh()
+                last = qsize
+                time.sleep(0.5)
+            process_queue.join()
+            bar.n = sticker_count
             bar.refresh()
-            last = qsize
-            time.sleep(0.5)
+            bar.clear()
+    else:
         process_queue.join()
-        bar.n = sticker_count
-        bar.refresh()
-        bar.clear()
-
     # TODO icon for all sticker packs
 
-    print('Process done! Cleaning up...')
+    norm_print('Process done! Cleaning up...')
 
     # remove temp dir
     shutil.rmtree(sticker_process_temp_root)
-    os.startfile(sticker_output_path)
+    if open_folder:
+        os.startfile(sticker_output_path)
 
 
 if __name__ == '__main__':
