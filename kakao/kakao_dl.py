@@ -17,14 +17,21 @@ from kakao_process import KakaoWebpProcessor
 CHROME_UA_HEADER = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.132 Safari/537.36'}
 
+_proxies = None
+
+
+def set_proxy(proxies):
+    global _proxies
+    _proxies = proxies
+
 
 # for kakao, sticker types are: gif webp png
 
 
 def get_sticker_id_and_title(url):
-    text_content = requests.get(url, headers={'User-Agent': 'Android'}).text
+    text_content = requests.get(url, headers={'User-Agent': 'Android'}, proxies=_proxies).text
     id_ptn = re.compile(r'kakaotalk://store/emoticon/(\d+)')
-    title_ptn = re.compile(r'KakaoTalk Emoticons \| (.+)</title>')
+    title_ptn = re.compile(r'<title>(.+)</title>')
     sticker_id = id_ptn.search(text_content).group(1)
     sticker_title = title_ptn.search(text_content).group(1)
 
@@ -32,9 +39,10 @@ def get_sticker_id_and_title(url):
 
 
 def get_sticker_icon_and_name(url):
-    resp = requests.get(url, headers=CHROME_UA_HEADER)
+    resp = requests.get(url, headers=CHROME_UA_HEADER, proxies=_proxies)
     sticker_name = resp.url.split('/')[-1]
-    sticker_data_resp = requests.get(f'https://e.kakao.com/api/v1/items/t/{sticker_name}', headers=CHROME_UA_HEADER)
+    sticker_data_resp = requests.get(f'https://e.kakao.com/api/v1/items/t/{sticker_name}', headers=CHROME_UA_HEADER,
+                                     proxies=_proxies)
     sticker_icon_url = sticker_data_resp.json()['result']['titleDetailUrl']
     return sticker_icon_url, sticker_name
 
@@ -70,12 +78,15 @@ def main():
     proxies = {}
     if args.proxy:
         proxies['https'] = args.proxy
+        set_proxy(proxies)
 
     sticker_url = args.url.strip()
     assert sticker_url.startswith('https://emoticon.kakao.com/items'), 'Invalid URL'
 
     sticker_id, sticker_title = get_sticker_id_and_title(sticker_url)
+    print('ID:', sticker_id, 'Title:', sticker_title)
     sticker_icon_url, sticker_name = get_sticker_icon_and_name(sticker_url)
+    print('Icon URL:', sticker_icon_url, 'Name:', sticker_name)
 
     print('Title:', sticker_title)
     print('Name:', sticker_name)
@@ -95,7 +106,7 @@ def main():
 
     print('Downloading sticker archive...')
 
-    archive_content = requests.get(f'http://item.kakaocdn.net/dw/{sticker_id}.file_pack.zip', headers=CHROME_UA_HEADER)
+    archive_content = requests.get(f'http://item.kakaocdn.net/dw/{sticker_id}.file_pack.zip', headers=CHROME_UA_HEADER,proxies=_proxies)
     print('Download done!')
 
     sticker_raw_type = ''

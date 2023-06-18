@@ -3,11 +3,13 @@ import os
 import shutil
 import subprocess
 import traceback
-from queue import Queue, Empty
+from queue import Empty, Queue
 from threading import Thread
 
 import ffmpeg
 from PIL import Image
+
+_MAGICK_BIN = shutil.which('magick')
 
 
 class KakaoWebpProcessor(Thread):
@@ -15,10 +17,6 @@ class KakaoWebpProcessor(Thread):
         Thread.__init__(self)
         self.task_queue: Queue = task_queue
         self.temp_dir = temp_dir
-        self.magick_bin = self.locate_magick_bin()
-
-    def locate_magick_bin(self):
-        return shutil.which('magick')
 
     def run(self) -> None:
 
@@ -61,14 +59,14 @@ class KakaoWebpProcessor(Thread):
     def scale_and_concat_frame(self, frame_file_path, out_file):
         # framerate is needed here since telegram ios client will use framerate as play speed
         # in fact, framerate in webm should be informative only
-        # ffmpeg will use 25 by default
+        # ffmpeg will use 25 by default, here according to telegram we use 30
         # so we set vsync=1 (cfr), let ffmpeg duplicate some frames to make ios happy
         # this will cause file size to increase a bit, but it should be OK
         # also 1/framerate seems to be the minimum unit of ffmpeg to encode frame duration
         # so shouldn't set it too small - which will cause too much error
         # https://bugs.telegram.org/c/14778
 
-        framerate = 25
+        framerate = 30
         ffmpeg.input(frame_file_path, format='concat') \
             .filter('scale', w='if(gt(iw,ih),512,-1)', h='if(gt(iw,ih),-1,512)') \
             .output(out_file, r=framerate, vsync=1) \
@@ -79,12 +77,12 @@ class KakaoWebpProcessor(Thread):
         # split frames using imagemagick, and reconstruct frames based on disposal/blending
         if not os.path.isdir(frame_working_dir_path):
             os.mkdir(frame_working_dir_path)
-        subprocess.call([self.magick_bin, in_file, os.path.join(frame_working_dir_path, 'frame-%d.png')], shell=False)
+        subprocess.call([_MAGICK_BIN, in_file, os.path.join(frame_working_dir_path, 'frame-%d.png')], shell=False)
 
         p = subprocess.Popen(
-            [self.magick_bin, 'identify', '-format', r'%T,%W,%H,%w,%h,%X,%Y,%[webp:mux-blend],%D|', in_file],
-            stdin=None, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, shell=False)
+                [_MAGICK_BIN, 'identify', '-format', r'%T,%W,%H,%w,%h,%X,%Y,%[webp:mux-blend],%D|', in_file],
+                stdin=None, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, shell=False)
         out, err = p.communicate()
         frame_data_str_output = out.decode().strip()[:-1]
         image_w, image_h = 0, 0
