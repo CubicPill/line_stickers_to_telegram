@@ -14,7 +14,8 @@ from utils import StickerType, sticker_type_properties
 
 _print_lock = Lock()
 _MAGICK_BIN = shutil.which('magick')
-GIF_ALPHA_THRESHOLD = 63
+_OPTIPNG_BIN = shutil.which('optipng')
+GIF_ALPHA_THRESHOLD = 1
 WEBM_SIZE_KB_MAX = 256
 WEBM_DURATION_SEC_MAX = 3
 
@@ -70,7 +71,7 @@ class ImageProcessorThread(Thread):
                 task: ProcessTask = self.queue.get_nowait()
             except queue.Empty:
                 continue
-            self._current_sticker_id = task.sticker_id
+            self._current_sticker_id = str(task.sticker_id)
             try:
                 curr_in = task.in_img
                 for i, op in enumerate(task.operations):
@@ -114,8 +115,8 @@ class ImageProcessorThread(Thread):
         else:
             subprocess.call([_MAGICK_BIN, in_file, '-resize', f'{size}x{size}', out_file])
 
-    def _make_frame_temp_dir(self, uid):
-        frame_tmp_path = os.path.join(self.temp_dir, uid)
+    def _make_frame_temp_dir(self):
+        frame_tmp_path = os.path.join(self.temp_dir, self._current_sticker_id)
         try:
             os.mkdir(frame_tmp_path)
         except FileExistsError:
@@ -140,6 +141,11 @@ class ImageProcessorThread(Thread):
             self.apng_convert_to_rgba(in_file, rgba_interim_apng)
         else:
             rgba_interim_apng = in_file
+
+        size_before_opt = os.path.getsize(rgba_interim_apng)
+        subprocess.call([_OPTIPNG_BIN, '-quiet', rgba_interim_apng])
+        size_after_opt = os.path.getsize(rgba_interim_apng)
+
         # if pix_fmt == 'pal8':
         #     # need to split frames, convert color, then replace in_file
         #     frame_tmp_path = self._make_frame_temp_dir(task.id)
@@ -195,7 +201,7 @@ class ImageProcessorThread(Thread):
 
             new_framerate = math.ceil((total_frames + 1) / 3)
 
-            frame_tmp_path = self._make_frame_temp_dir(self._current_sticker_id)
+            frame_tmp_path = self._make_frame_temp_dir()
 
             ffmpeg.input(in_apng, f='apng').output(os.path.join(frame_tmp_path, 'frame-%d.png'),
                                                    start_number=0).overwrite_output().run(
@@ -218,12 +224,19 @@ class ImageProcessorThread(Thread):
                              out_file])
 
     def to_gif(self, in_file, out_file):
-        palette_stream = ffmpeg.input(in_file, f='apng').filter('palettegen', reserve_transparent=1)
-        ffmpeg.filter([ffmpeg.input(in_file, f='apng'), palette_stream], 'paletteuse',
+        if self._sticker_has_animation:
+            f = 'apng'
+        else:
+            f = 'image2'
+        palette_stream = ffmpeg.input(in_file, f=f).filter('palettegen', reserve_transparent=1)
+        ffmpeg.filter([ffmpeg.input(in_file, f=f), palette_stream], 'paletteuse',
                       alpha_threshold=GIF_ALPHA_THRESHOLD) \
             .output(out_file, f='gif') \
             .overwrite_output() \
             .run(quiet=True)
+        # use imagemagick to optimize gif first then resize the layer to image size.
+        # also, ffmpeg seems to have issue with tencent qq/tim
+        subprocess.call(['magick', out_file, '-layers', 'optimize', '-coalesce', out_file])
 
     def to_video(self, in_pic, in_audio, out_file):
         streams = []

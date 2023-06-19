@@ -44,11 +44,12 @@ def main():
                             help='Do not create subdirectory for different output formats')
     arg_parser.add_argument('--show', action='store_true', help='Open the download/output directory after download')
     arg_parser.add_argument('-q', '--quiet', action='store_true', help='Do not print information and progress bar')
+    arg_parser.add_argument('-o', '--output-dir', type=str, help='Output directory for processed stickers')
     # conversion options
 
     # webm won't have audio track
     arg_parser.add_argument('--output-fmt', type=str, help='Output format', default='none',
-                            choices=['none', 'png', 'gif', 'webm', 'mp4', 'qq-auto'])
+                            choices=['none', 'png', 'gif', 'webm', 'mp4'])
 
     arg_parser.add_argument('--scale', help='Scale static stickers to 512*512, preserving aspect ratio',
                             action='store_true')
@@ -61,29 +62,20 @@ def main():
                             help='Do not put default text overlay on message stickers')
 
     # not commonly used
-    arg_parser.add_argument('-t', '--threads', type=int, help='Thread number of downloader, default 4')
+    arg_parser.add_argument('-t', '--threads', type=int, help='Thread number of downloader, default 4', default=4)
 
     args = arg_parser.parse_args()
-
-    # check dependency
-    if not shutil.which('magick'):
-        err_print('Error: ImageMagick is missing. Please install missing dependencies are re-run the program')
-        exit(1)
 
     sticker_data_root_dir = os.path.join(os.getcwd(), 'sticker_dl')
     if not os.path.exists(sticker_data_root_dir):
         os.mkdir(sticker_data_root_dir)
-
-    default_sticker_output_root_dir = os.path.join(os.getcwd(), 'sticker_out')
-    if not os.path.exists(default_sticker_output_root_dir):
-        os.mkdir(default_sticker_output_root_dir)
 
     # gather arguments
     proxies = {}
     if args.proxy:
         proxies['https'] = args.proxy
     webreq.set_proxy(proxies)
-    thread_num = args.threads or 4
+    thread_num = args.threads
     lang = args.lang
     dl_type = args.type
     if_remove_alpha = args.remove_alpha
@@ -95,11 +87,16 @@ def main():
     no_sub_dir = args.no_subdir
     open_folder = args.show
     quiet = args.quiet
+    if not args.output_dir:
+        default_sticker_output_root_dir = os.path.join(os.getcwd(), 'sticker_out')
+    else:
+        default_sticker_output_root_dir = args.output_dir
+    global norm_print
     if quiet:
-        global norm_print
         norm_print = lambda *args, **kwargs: None
         skip_confirmation = True
-
+    if not os.path.exists(default_sticker_output_root_dir):
+        os.mkdir(default_sticker_output_root_dir)
     # check if input is id or url
     if 'http' not in id_url:
         pack_id = id_url
@@ -193,6 +190,7 @@ def main():
         norm_print('Scale:', f'{scale_px}*{scale_px}px')
     if sticker_type == StickerType.MESSAGE_STICKER:
         norm_print('Default text overlay:', not no_default_txt_overlay)
+    norm_print('Output directory:', default_sticker_output_root_dir)
     norm_print('----------------------------------------------------')
     if not skip_confirmation:
         confirm = input('Do you wish to continue? Y/n: ')
@@ -358,14 +356,17 @@ def main():
             os.startfile(sticker_pack_root)
         sys.exit(0)
 
+    # check dependency for processing
+    if not shutil.which('magick'):
+        err_print('Error: ImageMagick is missing. Please install missing dependencies are re-run the program')
+        sys.exit(1)
+    if not shutil.which('optipng'):
+        print('Error: OptiPNG is missing. Please install missing dependencies are re-run the program')
+        sys.exit(1)
+
     # determine process option
     # for line, all stickers are png/apng
-    if output_fmt == 'qq-auto':
-        if has_animation:
-            output_format = OutputFormat.GIF
-        else:
-            output_format = OutputFormat.APNG
-    elif output_fmt == 'png':
+    if output_fmt == 'png':
         output_format = OutputFormat.APNG
     elif output_fmt == 'gif':
         output_format = OutputFormat.GIF
@@ -389,12 +390,11 @@ def main():
     if not os.path.isdir(sticker_output_path):
         os.makedirs(sticker_output_path)
 
-    if not has_animation and output_format != OutputFormat.APNG:
-        err_print('ERROR: Sticker pack does not have animation, only PNG output is supported!')
+    if not has_animation and output_format not in [OutputFormat.APNG, OutputFormat.GIF]:
+        err_print('ERROR: Sticker pack does not have animation, only PNG and GIF output are supported!')
         sys.exit(1)
 
     for sticker_id in id_list:
-        temp_dir = tempfile.mkdtemp()
         sub_folder = 'static'
         if is_emoji:
             sub_folder = 'emoji'
@@ -408,7 +408,7 @@ def main():
         in_audio = os.path.join(sticker_raw_path, 'sound', f'{sticker_id}.m4a')
         in_overlay = os.path.join(sticker_raw_path, 'default_overlay', f'{sticker_id}.png')
 
-        result_output = os.path.sep.join([sticker_output_path, f'{sticker_id}.{output_format.value}'])
+        result_output = os.path.join(sticker_output_path, f'{sticker_id}.{output_format.value}')
 
         operations = []
 
