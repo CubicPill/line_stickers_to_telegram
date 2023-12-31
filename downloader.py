@@ -15,12 +15,30 @@ from tqdm import tqdm
 import webreq
 from processing import ImageProcessorThread, Operation, OutputFormat, ProcessTask
 from utils import MESSAGE_STICKER_OVERLAY_DEFAULT, STICKER_SET_URL_REGEX, SourceUrlType, \
-    StickerType, sticker_type_properties
+    StickerType, get_counter_value, reset_counter, sticker_type_properties
 from webreq import MultiThreadDownloader, get_metadata, get_real_pack_id_from_yabe_emoji, \
     get_sticker_archive, get_sticker_info_from_line_page
 
 err_print = print
 norm_print = print
+
+
+def wait_for_queue_with_progress(quiet: bool, queue: Queue, total: int):
+    if not quiet:
+        reset_counter()
+        with tqdm(total=total) as bar:
+            last = 0
+            while not (completed := get_counter_value()) == total:
+                bar.update(completed - last)
+                bar.refresh()
+                last = completed
+                time.sleep(0.5)
+            queue.join()
+            bar.n = total
+            bar.refresh()
+            bar.clear()
+    else:
+        queue.join()
 
 
 def main():
@@ -62,7 +80,7 @@ def main():
                             help='Do not put default text overlay on message stickers')
 
     # not commonly used
-    arg_parser.add_argument('-t', '--threads', type=int, help='Thread number of downloader, default 4', default=4)
+    arg_parser.add_argument('-t', '--threads', type=int, help='Thread number of processing threads', default=8)
 
     args = arg_parser.parse_args()
 
@@ -213,6 +231,7 @@ def main():
         os.mkdir(sticker_dl_path)
 
     sticker_process_temp_root = tempfile.mkdtemp()
+    print(sticker_process_temp_root)
     sticker_temp_store_extracted_zip_path = os.path.join(sticker_process_temp_root, 'extracted')
 
     # check if the archive has already been downloaded
@@ -321,9 +340,7 @@ def main():
             os.mkdir(default_overlay_dl_path)
             norm_print('Downloading default overlay message for message sticker... ')
             download_queue = Queue()
-            download_completed_queue = Queue()
-            downloader = [MultiThreadDownloader(download_queue, download_completed_queue) for _ in
-                          range(thread_num)]
+            downloader = [MultiThreadDownloader(download_queue) for _ in range(4)]
 
             for sticker_id in id_list:
                 filename = os.path.join(default_overlay_dl_path, f'{sticker_id}.png')
@@ -331,19 +348,7 @@ def main():
                 download_queue.put((sticker_id, url, filename))
             for d in downloader:
                 d.start()
-            if not quiet:
-                with tqdm(total=sticker_count) as bar:
-                    last = sticker_count
-                    while not download_queue.empty():
-                        bar.update(last - download_queue.qsize())
-                        last = download_queue.qsize()
-                        time.sleep(0.1)
-                    download_queue.join()
-                    bar.n = sticker_count
-                    bar.refresh()
-                    bar.clear()
-            else:
-                download_queue.join()
+            wait_for_queue_with_progress(quiet, download_queue, sticker_count)
 
             norm_print('Message sticker default overlay download done!')
         else:
@@ -359,9 +364,6 @@ def main():
     # check dependency for processing
     if not shutil.which('magick'):
         err_print('Error: ImageMagick is missing. Please install missing dependencies are re-run the program')
-        sys.exit(1)
-    if not shutil.which('optipng'):
-        print('Error: OptiPNG is missing. Please install missing dependencies are re-run the program')
         sys.exit(1)
 
     # determine process option
@@ -431,30 +433,18 @@ def main():
                 ProcessTask(sticker_id, in_pic, in_audio, in_overlay, scale_px, operations, result_output))
 
     processor = [ImageProcessorThread(process_queue, sticker_process_temp_root, sticker_type, output_format) for _ in
-                 range(8)]
+                 range(thread_num)]
     for p in processor:
         p.start()
-    if not quiet:
-        with tqdm(total=sticker_count) as bar:
-            last = sticker_count
-            while not process_queue.empty():
-                qsize = process_queue.qsize()
-                bar.update(last - qsize)
-                bar.refresh()
-                last = qsize
-                time.sleep(0.5)
-            process_queue.join()
-            bar.n = sticker_count
-            bar.refresh()
-            bar.clear()
-    else:
-        process_queue.join()
+    wait_for_queue_with_progress(quiet, process_queue, sticker_count)
+
     # TODO icon for all sticker packs
 
     norm_print('Process done! Cleaning up...')
 
     # remove temp dir
     shutil.rmtree(sticker_process_temp_root)
+    # os.startfile(sticker_process_temp_root)
     if open_folder:
         os.startfile(sticker_output_path)
 
