@@ -11,7 +11,7 @@ def parse_page(content: bytes, source: SourceUrlType):
         SourceUrlType.YABE: parse_page_yabe,
         SourceUrlType.YABE_EMOJI: parse_page_yabe,
         SourceUrlType.LINE: parse_page_line,
-        SourceUrlType.LINE_EMOJI: parse_page_line
+        SourceUrlType.LINE_EMOJI: parse_page_line,
     }
     if source not in parser.keys():
         raise ValueError
@@ -27,10 +27,10 @@ def parse_page_yabe(content: bytes, emoji: bool):
         sticker_type = StickerType.EMOJI
     else:
         sticker_type = StickerType.STATIC_STICKER
-    soup = BeautifulSoup(content, 'html5lib')
-    talk_icon = soup.select_one('div.stickerData div.talkIcon')
-    move_icon = soup.select_one('div.stickerData div.moveIcon')
-    popup_icon = soup.select_one('div.stickerData div.PopUpIcon')
+    soup = BeautifulSoup(content, "html5lib")
+    talk_icon = soup.select_one("div.stickerData div.talkIcon")
+    move_icon = soup.select_one("div.stickerData div.moveIcon")
+    popup_icon = soup.select_one("div.stickerData div.PopUpIcon")
     if talk_icon and popup_icon:
         sticker_type = StickerType.POPUP_AND_SOUND_STICKER
     elif popup_icon:
@@ -44,20 +44,26 @@ def parse_page_yabe(content: bytes, emoji: bool):
             sticker_type = StickerType.ANIMATED_EMOJI
         else:
             sticker_type = StickerType.ANIMATED_STICKER
-    title = soup.select_one('div.stickerData div.title')
+    title = soup.select_one("div.stickerData div.title")
     if title:
         title = title.text
     else:
-        raise Exception('Error: Title not found')
+        raise Exception("Error: Title not found")
     id_list = list()
     if emoji:
-        sticker_id_pattern = re.compile(r'sticonshop/v1/sticon/[a-f0-9]+/iPhone/(\d+)(?:_animation)?.png',
-                                        flags=re.IGNORECASE)
+        sticker_id_pattern = re.compile(
+            r"sticonshop/v1/sticon/[a-f0-9]+/iPhone/(\d+)(?:_animation)?.png",
+            flags=re.IGNORECASE,
+        )
     else:
-        sticker_id_pattern = re.compile(r'stickershop/v1/sticker/(\d+)/\w+/sticker.png', flags=re.IGNORECASE)
-    real_pack_id_pattern = re.compile(r'sticonshop/v1/sticon/([a-f0-9]+)/iPhone/\d+(?:_animation)?.png',
-                                      flags=re.IGNORECASE)
-    sticker_list = soup.find_all('li', {'class': 'stickerSub'})
+        sticker_id_pattern = re.compile(
+            r"stickershop/v1/sticker/(\d+)/\w+/sticker.png", flags=re.IGNORECASE
+        )
+    real_pack_id_pattern = re.compile(
+        r"sticonshop/v1/sticon/([a-f0-9]+)/iPhone/\d+(?:_animation)?.png",
+        flags=re.IGNORECASE,
+    )
+    sticker_list = soup.find_all("li", {"class": "stickerSub"})
     for sticker in sticker_list:
         match = sticker_id_pattern.search(str(sticker))
         if match:
@@ -75,23 +81,23 @@ def parse_page_line(content: bytes, emoji: bool):
         sticker_type = StickerType.EMOJI
     else:
         sticker_type = StickerType.STATIC_STICKER
-    soup = BeautifulSoup(content, 'html5lib')
-    if soup.find('span', {'class': 'MdIcoFlash_b'}):
+    soup = BeautifulSoup(content, "html5lib")
+    if soup.find("span", {"class": "MdIcoFlash_b"}):
         sticker_type = StickerType.POPUP_STICKER
-    elif soup.find('span', {'class': 'MdIcoFlashAni_b'}):
+    elif soup.find("span", {"class": "MdIcoFlashAni_b"}):
         sticker_type = StickerType.POPUP_AND_SOUND_STICKER
-    elif soup.find('span', {'class': 'MdIcoPlay_b'}):
+    elif soup.find("span", {"class": "MdIcoPlay_b"}):
         if emoji:
             sticker_type = StickerType.ANIMATED_EMOJI
         else:
             sticker_type = StickerType.ANIMATED_STICKER
-    elif soup.find('span', {'class': 'MdIcoFlash_b'}):
+    elif soup.find("span", {"class": "MdIcoFlash_b"}):
         sticker_type = StickerType.ANIMATED_AND_SOUND_STICKER
-    elif soup.find('span', {'class': 'MdIcoSound_b'}):
+    elif soup.find("span", {"class": "MdIcoSound_b"}):
         sticker_type = StickerType.STATIC_WITH_SOUND_STICKER
 
-    title = soup.find('p', {'class': 'mdCMN38Item01Ttl'})
-    title2 = soup.find('h3')
+    title = soup.find("p", {"class": "mdCMN38Item01Ttl"})
+    title2 = soup.find("h3")
     if title:
         title = title.text
     elif title2:
@@ -99,19 +105,25 @@ def parse_page_line(content: bytes, emoji: bool):
         title = title2.text
     else:
         print(soup)
-        raise Exception('Error: Title not found')
+        raise Exception("Error: Title not found")
     id_list = list()
     if emoji:
-        sticker_id_pattern = re.compile(r'sticonshop/v1/sticon/[a-f0-9]+/iPhone/(\d+)(?:_animation)?.png',
-                                        flags=re.IGNORECASE)
+        sticker_id_pattern = re.compile(
+            r"sticonshop/v1/sticon/[a-f0-9]+/iPhone/(\d+)(?:_animation)?.png",
+            flags=re.IGNORECASE,
+        )
     else:
-        sticker_id_pattern = re.compile(r'stickershop/v1/sticker/(\d+)/\w+/sticker.png', flags=re.IGNORECASE)
-    sticker_list = soup.find_all('span', {'class': 'mdCMN09Image'})
+        sticker_id_pattern = re.compile(
+            r"stickershop/v1/sticker/(\d+)/\w+/sticker.png", flags=re.IGNORECASE
+        )
+    sticker_list = soup.find_all("span", {"class": "mdCMN09Image"})
     for sticker in sticker_list:
-        match = sticker_id_pattern.search(sticker['style'])
+        match = sticker_id_pattern.search(sticker["style"])
         if match:
             id_list.append(match.group(1))
     id_list = list(set(id_list))
     # for line id, conversion is not needed, real_id returns 0
     return 0, title, id_list, sticker_type
+
+
 # end deprecated
