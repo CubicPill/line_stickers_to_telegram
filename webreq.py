@@ -7,7 +7,7 @@ from bs4 import BeautifulSoup
 
 from utils import EMOJI_SET_META_URL, FAKE_HEADERS, STICKER_SET_META_URL, STICKER_SET_URL_TEMPLATES, \
     STICKER_ZIP_TEMPLATES, SourceUrlType, \
-    StickerType
+    StickerType, increase_counter
 
 _proxies = None
 
@@ -53,9 +53,19 @@ def get_sticker_info_from_line_page(pack_id, is_emoji, lang):
         author_name = soup.select_one('a[data-test="emoji-author"]').text
         author_id = re.search(r'author/(\d+)', soup.select_one('a[data-test="emoji-author"]').attrs['href']).group(1)
     else:
-        title = soup.select_one('p[data-test="sticker-name-title"]').text
-        author_name = soup.select_one('a[data-test="sticker-author"]').text
-        author_id = re.search(r'author/(\d+)', soup.select_one('a[data-test="sticker-author"]').attrs['href']).group(1)
+        if soup.select_one('p[data-test="sticker-name-title"]'):
+            title = soup.select_one('p[data-test="sticker-name-title"]').text
+            author_name = soup.select_one('a[data-test="sticker-author"]').text
+        elif soup.select_one('h3[data-test="oa-sticker-title"]'):
+            title = soup.select_one('h3[data-test="oa-sticker-title"]').text
+            author_name = soup.select_one('p[data-test="oa-sticker-author"]').text
+        else:
+            raise ValueError('Unable to locate sticker title!')
+        if soup.select_one('a[data-test="sticker-author"]'):
+            author_id = re.search(r'author/(\d+)',
+                                  soup.select_one('a[data-test="sticker-author"]').attrs['href']).group(1)
+        else:
+            author_id = None
     return title, author_name, author_id
 
 
@@ -77,10 +87,9 @@ def get_sticker_archive(pack_id, sticker_type: StickerType):
 
 
 class MultiThreadDownloader(Thread):
-    def __init__(self, queue, out_queue, overwrite=False):
+    def __init__(self, queue, overwrite=False):
         Thread.__init__(self, name='DownloadThread')
         self.queue = queue
-        self.out_queue = out_queue
         self.overwrite = overwrite
 
     def run(self):
@@ -92,6 +101,7 @@ class MultiThreadDownloader(Thread):
                 self.queue.put((_id, url, path))
 
             else:
-                self.out_queue.put(_id)
+                increase_counter()
             finally:
                 self.queue.task_done()
+                increase_counter()

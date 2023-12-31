@@ -1,5 +1,6 @@
 import re
 from enum import Enum
+from threading import Lock
 
 
 class StickerType(Enum):
@@ -110,3 +111,22 @@ STICKER_URL_TEMPLATES = {
 FAKE_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.132 Safari/537.36'
 }
+_counter_lock = Lock()
+_task_completed_counter = 0
+
+
+def get_counter_value():
+    with _counter_lock:
+        return _task_completed_counter
+
+
+def increase_counter():
+    with _counter_lock:
+        global _task_completed_counter
+        _task_completed_counter += 1
+
+
+def reset_counter():
+    with _counter_lock:
+        global _task_completed_counter
+        _task_completed_counter = 0

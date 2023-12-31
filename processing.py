@@ -1,5 +1,4 @@
 import datetime
-import math
 import os.path
 import queue
 import shutil
@@ -10,14 +9,14 @@ from threading import Lock, Thread
 
 import ffmpeg
 
-from utils import StickerType, sticker_type_properties
+from utils import StickerType, increase_counter, sticker_type_properties
 
-_print_lock = Lock()
-_MAGICK_BIN = shutil.which('magick')
-_OPTIPNG_BIN = shutil.which('optipng')
 GIF_ALPHA_THRESHOLD = 1
 WEBM_SIZE_KB_MAX = 256
 WEBM_DURATION_SEC_MAX = 3
+
+_MAGICK_BIN = shutil.which('magick')
+_print_lock = Lock()
 
 
 class OutputFormat(Enum):
@@ -85,7 +84,12 @@ class ImageProcessorThread(Thread):
                     elif op == Operation.TO_GIF:
                         self.to_gif(curr_in, curr_out)
                     elif op == Operation.TO_WEBM:
-                        self.to_webm(curr_in, curr_out)
+                        frame_dir = self.make_frame_temp_dir()
+                        self.split_apng_frames(curr_in, frame_dir)
+                        durations = self.get_animation_delays(curr_in)
+                        webm_uncapped = os.path.join(self.temp_dir, f'{self._current_sticker_id}.raw.webm')
+                        self.to_webm(durations, frame_dir, webm_uncapped)
+                        self.cap_webm_duration_and_size(durations, webm_uncapped, frame_dir, curr_out)
                     elif op == Operation.TO_MP4:
                         self.to_video(curr_in, task.in_audio, curr_out)
                     curr_in = curr_out
@@ -102,6 +106,13 @@ class ImageProcessorThread(Thread):
                     traceback.print_exc()
             finally:
                 self.queue.task_done()
+                increase_counter()
+
+    def make_frame_temp_dir(self):
+        frame_working_dir_path = os.path.join(self.temp_dir, 'frames_' + self._current_sticker_id)
+        if not os.path.isdir(frame_working_dir_path):
+            os.mkdir(frame_working_dir_path)
+        return frame_working_dir_path
 
     def overlay_sticker_message(self, in_img, in_overlay, out_file):
         # overlay in_overlay on in_img
@@ -113,7 +124,7 @@ class ImageProcessorThread(Thread):
                                                    h=f'if(gt(iw,ih),-1,{size})').output(
                     out_file, pix_fmt='rgba', f='apng').run(quiet=True)
         else:
-            subprocess.call([_MAGICK_BIN, in_file, '-resize', f'{size}x{size}', out_file])
+            subprocess.call([_MAGICK_BIN, 'PNG:' + in_file, '-resize', f'{size}x{size}', 'PNG:' + out_file])
 
     def _make_frame_temp_dir(self):
         frame_tmp_path = os.path.join(self.temp_dir, self._current_sticker_id)
@@ -127,66 +138,50 @@ class ImageProcessorThread(Thread):
         ffmpeg.input(in_file, f='apng').overwrite_output(
                 out_file, pix_fmt='rgba', f='apng').run(quiet=True)
 
-    def to_webm(self, in_file, out_file):
-        # TODO verify the framerate
-        # kakao and here both split and rejoin frames
-        # however from line apng there's no issue with play speed -p
-        try:
-            pix_fmt = ffmpeg.probe(in_file)['streams'][0]['pix_fmt']
-        except KeyError:
-            pix_fmt = 'unknown'
-        # convert non-rgba to rgba
-        if pix_fmt != 'rgba':
-            rgba_interim_apng = os.path.join(self.temp_dir, f'{self._current_sticker_id}.rgba.png')
-            self.apng_convert_to_rgba(in_file, rgba_interim_apng)
-        else:
-            rgba_interim_apng = in_file
+    def split_apng_frames(self, in_file, frame_dir):
+        # split frames using imagemagick
+        subprocess.call(
+                [_MAGICK_BIN, 'APNG:' + in_file, '-coalesce', os.path.join(frame_dir, 'frame-%02d.png')])
 
-        size_before_opt = os.path.getsize(rgba_interim_apng)
-        subprocess.call([_OPTIPNG_BIN, '-quiet', rgba_interim_apng])
-        size_after_opt = os.path.getsize(rgba_interim_apng)
+    def _make_frame_file(self, durations, frame_working_dir_path):
+        with open(os.path.join(frame_working_dir_path, 'frames.txt'), 'w') as f:
+            for i, d in enumerate(durations):
+                f.write(f"file 'frame-{i:02d}.png'\n")
+                f.write(f'duration {d}\n')
+            # last frame need to be put twice, see: https://trac.ffmpeg.org/wiki/Slideshow
+            # f.write(f"file 'frame-{len(durations) - 1}.png'\n")
+        return os.path.join(frame_working_dir_path, 'frames.txt')
 
-        # if pix_fmt == 'pal8':
-        #     # need to split frames, convert color, then replace in_file
-        #     frame_tmp_path = self._make_frame_temp_dir(task.id)
-        #
-        #     framerate_str = ffmpeg.probe(task.current_in_file_path)['streams'][0]['r_frame_rate']
-        #     framerate = round(int(framerate_str.split('/')[0]) / int(framerate_str.split('/')[1]))
-        #
-        #     ffmpeg.input(task.current_in_file_path, f='apng'). \
-        #         output(os.path.join(frame_tmp_path, 'frame-convert-%d.png'), start_number=0) \
-        #         .overwrite_output(). \
-        #         run(quiet=True)
-        #
-        #     for fn in os.listdir(frame_tmp_path):
-        #         if fn.startswith('frame-convert'):
-        #             # convert color to rgba
-        #             fn_full = os.path.join(frame_tmp_path, fn)
-        #             image = Image.open(fn_full)
-        #             image = image.convert('RGBA')
-        #             image.save(fn_full)
-        #     ffmpeg.input(os.path.join(frame_tmp_path, 'frame-convert-%d.png'),
-        #                  start_number=0, framerate=framerate, ) \
-        #         .output(task.current_out_file_path, f='apng') \
-        #         .overwrite_output() \
-        #         .run(quiet=True)
-        #     task.step_done()
-        raw_output_file = os.path.join(self.temp_dir, f'{self._current_sticker_id}.raw.webm')
+    def to_webm(self, durations, frame_dir, out_file):
+        # framerate is needed here since telegram ios client will use framerate as play speed
+        # in fact, framerate in webm should be informative only
+        # ffmpeg will use 25 by default, here according to telegram we use 30
+        # so we set vsync=1 (cfr), let ffmpeg duplicate some frames to make ios happy
+        # this will cause file size to increase a bit, but it should be OK
+        # also 1/framerate seems to be the minimum unit of ffmpeg to encode frame duration
+        # so shouldn't set it too small - which will cause too much error
+        # https://bugs.telegram.org/c/14778
 
-        ffmpeg.input(rgba_interim_apng, f='apng').output(raw_output_file).overwrite_output().run(quiet=True)
-        capped_webm = os.path.join(self.temp_dir, f'{self._current_sticker_id}.cap.webm')
-        if not self.cap_webm_duration_and_size(raw_output_file, rgba_interim_apng, capped_webm):
-            capped_webm = raw_output_file
-        shutil.copy(capped_webm, out_file)
+        frame_file_path = self._make_frame_file(durations, frame_dir)
 
-    def cap_webm_duration_and_size(self, in_webm, in_apng, out_file):
-        # probe, ensure it's max 3 seconds
-        # length is not accurate in apng, must probe converted webm
+        ffmpeg.input(frame_file_path, format='concat') \
+            .output(out_file, r=30, fps_mode='cfr', f='webm') \
+            .overwrite_output() \
+            .run(quiet=False)
 
-        size_kb = os.path.getsize(in_webm) / 1024
-        duration_str = ffmpeg.probe(in_webm)['streams'][0]['tags']['DURATION']
-        framerate_str = ffmpeg.probe(in_webm)['streams'][0]['r_frame_rate']
-        framerate = round(int(framerate_str.split('/')[0]) / int(framerate_str.split('/')[1]))
+    def get_animation_delays(self, in_apng):
+
+        p = subprocess.Popen(
+                [_MAGICK_BIN, 'identify', '-format', r'%T,', 'APNG:' + in_apng],
+                stdin=None, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, shell=False)
+        out, err = p.communicate()
+        frame_data_str_output = out.decode().strip()[:-1]
+        delays = [round(int(i) / 100, 3) for i in frame_data_str_output.split(',')]
+        return delays
+
+    def probe_duration(self, file):
+        duration_str = ffmpeg.probe(file)['streams'][0]['tags']['DURATION']
 
         hms, us = duration_str.split('.')
         us = us[:6]
@@ -194,22 +189,35 @@ class ImageProcessorThread(Thread):
         duration_dt = datetime.datetime.strptime(duration_str, '%H:%M:%S.%f')
         duration_seconds = datetime.timedelta(seconds=duration_dt.second,
                                               microseconds=duration_dt.microsecond).total_seconds()
-        total_frames = round(duration_seconds * framerate)
+        return duration_seconds
+
+    def cap_webm_duration_and_size(self, durations, in_webm, frame_dir, out_file):
+        # TODO even after optimization, webm file size may still exceed the limit. Lossy compression may be needed
+        print('Cap webm duration and size')
+        # probe duration, ensure it's max 3 seconds
+        duration_seconds = self.probe_duration(in_webm)
 
         if duration_seconds > WEBM_DURATION_SEC_MAX:
-            # need to speedup: split image to frames and re-generate
+            factor = duration_seconds / WEBM_DURATION_SEC_MAX
+            while True:
+                # loop to reduce frame duration until it's less than WEBM_DURATION_SEC_MAX seconds
+                new_delays = [int(d / factor * 1000) / 1000 for d in durations]
+                print('New delays: ', new_delays)
+                self.to_webm(new_delays, frame_dir, out_file)
+                new_duration_seconds = self.probe_duration(file=out_file)
+                if new_duration_seconds > WEBM_DURATION_SEC_MAX:
+                    print(f'WARNING: Duration too long, cap again: {new_duration_seconds} seconds')
+                    factor = factor * 1.05
+                else:
+                    break
+        else:  # just copy
+            shutil.copyfile(in_webm, out_file)
 
-            new_framerate = math.ceil((total_frames + 1) / 3)
-
-            frame_tmp_path = self._make_frame_temp_dir()
-
-            ffmpeg.input(in_apng, f='apng').output(os.path.join(frame_tmp_path, 'frame-%d.png'),
-                                                   start_number=0).overwrite_output().run(
-                    quiet=True)
-            ffmpeg.input(os.path.join(frame_tmp_path, 'frame-%d.png'), start_number=0, framerate=new_framerate,
-                         ).output(out_file).overwrite_output().run(quiet=True)
-            return True
-        return False
+        # see if file size is OK
+        if os.path.getsize(out_file) > WEBM_SIZE_KB_MAX * 1024:
+            # TODO optimize file size
+            with _print_lock:
+                print(f'WARNING: File size too large, {os.path.getsize(out_file) / 1024} KB')
 
     def remove_alpha(self, in_file, out_file):
         if self._sticker_has_animation:
@@ -217,11 +225,13 @@ class ImageProcessorThread(Thread):
                                                    r='(r(X,Y)*alpha(X,Y)/255)+(255-alpha(X,Y))',
                                                    g='(g(X,Y)*alpha(X,Y)/255)+(255-alpha(X,Y))',
                                                    b='(b(X,Y)*alpha(X,Y)/255)+(255-alpha(X,Y))',
-                                                   a=255).output(out_file, f='apng').overwrite_output().run(quiet=True)
+                                                   a=255).output(out_file, f='apng',
+                                                                 pix_fmt='rgb24').overwrite_output().run(quiet=True)
         else:
             # use magick for static image
-            subprocess.call(['magick', 'convert', in_file, '-background', 'white', '-alpha', 'remove', '-alpha', 'off',
-                             out_file])
+            subprocess.call(
+                    ['magick', 'convert', 'PNG:' + in_file, '-background', 'white', '-alpha', 'remove', '-alpha', 'off',
+                     'PNG:' + out_file])
 
     def to_gif(self, in_file, out_file):
         if self._sticker_has_animation:
@@ -234,9 +244,8 @@ class ImageProcessorThread(Thread):
             .output(out_file, f='gif') \
             .overwrite_output() \
             .run(quiet=True)
-        # use imagemagick to optimize gif first then resize the layer to image size.
-        # also, ffmpeg seems to have issue with tencent qq/tim
-        subprocess.call(['magick', out_file, '-layers', 'optimize', '-coalesce', out_file])
+        # issue with tencent qq/tim
+        subprocess.call(['magick', out_file, '-coalesce', out_file])
 
     def to_video(self, in_pic, in_audio, out_file):
         streams = []
