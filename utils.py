@@ -118,6 +118,7 @@ MESSAGE_STICKER_OVERLAY_TEXT = "https://store.line.me/overlay/sticker/{pack_id}/
 MESSAGE_STICKER_OVERLAY_DEFAULT = "https://stickershop.line-scdn.net/stickershop/v1/product/{pack_id}/sticker/{sticker_id}/iPhone/overlay/plus/default/sticker@2x.png"
 # NAME_TEXT_STICKER_OVERLAY_TEXT = 'https://stickershop.line-scdn.net/stickershop/v1/sticker/{pack_id}/iPhone/overlay/name/{id}/sticker@2x.png'
 # 'https://store.line.me/api/custom-sticker/preview/{pack_id}/zh-Hant?text={text}&_={ts}'
+# requires login to line
 
 # individual sticker
 STICKER_URL_TEMPLATES = {

@@ -1,5 +1,4 @@
 import argparse
-import hashlib
 import json
 import os
 import re
@@ -29,11 +28,11 @@ from webreq import (
     get_metadata,
     get_real_pack_id_from_yabe_emoji,
     get_sticker_archive,
-    get_sticker_info_from_line_page,
 )
 
 err_print = print
 norm_print = print
+sticker_process_temp_root = None
 
 
 def wait_for_queue_with_progress(quiet: bool, queue: Queue, total: int):
@@ -161,16 +160,24 @@ def main():
         os.mkdir(sticker_data_root_dir)
 
     # gather arguments
+
+    # handle proxies
     proxies = {}
+    if os.path.exists("./PROXY"):
+        with open("./PROXY") as f:
+            proxies["https"] = f.read().strip()
     if args.proxy:
+        # proxy in args will override the PROXY file
         proxies["https"] = args.proxy
     webreq.set_proxy(proxies)
+
     thread_num = args.threads
     lang = args.lang
-    dl_type = args.type
-    if_remove_alpha = args.remove_alpha
+    pack_type = args.type
+    remove_alpha = args.remove_alpha
     id_url = args.id_url.strip()
-    if_scale = args.scale
+    scale_to_512_square = args.scale
+    re_download = args.redownload
     output_fmt = args.output_fmt
     no_default_txt_overlay = args.no_default_txt_overlay
     skip_confirmation = args.y
@@ -190,7 +197,7 @@ def main():
     # check if input is id or url
     if "http" not in id_url:
         pack_id = id_url
-        is_emoji = dl_type == "emoji"
+        is_emoji = pack_type == "emoji"
         if not is_emoji and len(pack_id) >= 24:
             err_print(
                 "WARNING: You probably want to download an emoji pack, but the sticker type is not specified as emoji."
@@ -215,56 +222,31 @@ def main():
             )
             sys.exit(1)
 
-    # from here, pack_id should be ready. Check if the sticker set has already been downloaded
-    for d in os.listdir(sticker_data_root_dir):
-        if os.path.isdir(os.path.join(sticker_data_root_dir, d)):
-            e_pack_id = d.split(".")[0]
-            if pack_id == e_pack_id:
-                # exists. open metadata file
-                if os.path.exists(os.path.join(sticker_data_root_dir, d, "info.json")):
-                    with open(
-                        os.path.join(sticker_data_root_dir, d, "info.json"),
-                        "r",
-                        encoding="utf-8",
-                    ) as f:
-                        pack_info = json.load(f)
-                        norm_print(f"Found local metadata for pack {pack_id}!")
-                        break
+    # from here, pack_id should be ready
+
+    # Check if the sticker set archive exists
+    sticker_pack_dl_root = os.path.join(sticker_data_root_dir, pack_id)
+    pack_archive_path = os.path.join(sticker_pack_dl_root, "pack.zip")
+    pack_archive_exists = os.path.isfile(pack_archive_path)
+    download_pack = True
+    if pack_archive_exists and not re_download:
+        norm_print(f"Found local archive for pack {pack_id}!")
+        archive = zipfile.ZipFile(pack_archive_path, "r")
+        metadata = json.loads(archive.read("productInfo.meta"))
+        download_pack = False
     else:
-        # get metadata
+        # get metadata from line store
         try:
             metadata = get_metadata(pack_id, is_emoji)
         except PackNotFoundException:
             err_print(
-                f'FAILED: Cannot find sticker set {pack_id} with type "{dl_type}"!'
+                f'ERROR: Cannot find sticker set {pack_id} with type "{pack_type}"!'
             )
             sys.exit(1)
-        title, author_name, author_id = get_sticker_info_from_line_page(
-            pack_id, is_emoji, lang
-        )
-        if is_emoji:
-            if metadata.get("sticonResourceType") == "ANIMATION":
-                sticker_type = StickerType.ANIMATED_EMOJI
-            else:
-                sticker_type = StickerType.EMOJI
-            id_list = metadata["orders"]
-        else:
-            if "stickerResourceType" not in metadata:
-                sticker_type = StickerType.STATIC_STICKER
-            else:
-                sticker_type = StickerType(metadata["stickerResourceType"])
-            id_list = [i["id"] for i in metadata["stickers"]]
+    pack_info = extract_pack_info_from_metadata(metadata, pack_id, lang, is_emoji)
 
-        pack_info = {
-            "title": title,
-            "author_name": author_name,
-            "author_id": author_id,
-            "pack_id": pack_id,
-            "sticker_type": sticker_type.value,
-            "count": len(id_list),
-            "stickers": id_list,
-            "archive_md5": None,
-        }
+    # from here, pack_info should be ready
+
     title = pack_info["title"]
     sticker_type = StickerType(pack_info["sticker_type"])
     id_list = pack_info["stickers"]
@@ -276,8 +258,9 @@ def main():
         has_text_overlay,
         is_emoji,
     ) = sticker_type_properties(sticker_type)
+
     scale_px = 0
-    if if_scale and not has_animation:
+    if scale_to_512_square and not has_animation:
         scale_px = 512
     elif output_fmt == "webm":
         if is_emoji:
@@ -289,16 +272,19 @@ def main():
     norm_print("Pack ID:", pack_id)
     norm_print("Sticker Type:", sticker_type.name)
     norm_print("Total number of stickers:", sticker_count)
-    if output_fmt == "none":
-        norm_print("Output format: <Download Only>")
+    processing_needed = output_fmt != "none"
+    if not processing_needed:
+        norm_print("Output format: RAW")
     else:
         norm_print("Output format:", output_fmt)
-    if scale_px:
-        norm_print("Scale:", f"{scale_px}*{scale_px}px")
-    if sticker_type == StickerType.MESSAGE_STICKER:
-        norm_print("Default text overlay:", not no_default_txt_overlay)
-    norm_print("Output directory:", default_sticker_output_root_dir)
+        if scale_px:
+            norm_print("Scale:", f"{scale_px}*{scale_px}px")
+        if sticker_type == StickerType.MESSAGE_STICKER:
+            norm_print("Default text overlay:", not no_default_txt_overlay)
+            norm_print("Output directory:", default_sticker_output_root_dir)
+
     norm_print("----------------------------------------------------")
+
     if not skip_confirmation:
         confirm = input("Do you wish to continue? Y/n: ")
         if confirm.lower() == "n":
@@ -309,199 +295,69 @@ def main():
             sys.exit(1)
 
     # create folders
-    sanitized_title = "_".join(re.sub(r'[/:*?"<>|]', "", title).split())
-    folder_name = pack_id + "." + sanitized_title
-    sticker_pack_root = os.path.join(sticker_data_root_dir, folder_name)
-    if not os.path.isdir(sticker_pack_root):
-        os.mkdir(sticker_pack_root)
+    if not os.path.isdir(sticker_pack_dl_root):
+        os.mkdir(sticker_pack_dl_root)
 
-    sticker_dl_path = os.path.join(sticker_pack_root, "dl")
-    if not os.path.isdir(sticker_dl_path):
-        os.mkdir(sticker_dl_path)
-
-    sticker_process_temp_root = tempfile.mkdtemp()
-    print(sticker_process_temp_root)
-    sticker_temp_store_extracted_zip_path = os.path.join(
-        sticker_process_temp_root, "extracted"
-    )
-
-    # check if the archive has already been downloaded
-    archive_path = os.path.join(sticker_dl_path, "archive.zip")
-    download_archive = True
-    if os.path.exists(archive_path):
-        # verify integrity using md5
-        norm_print("Archive exists. Verifying integrity... ", end="")
-        with open(archive_path, "rb") as f:
-            archive_content = f.read()
-        archive_md5 = hashlib.md5(archive_content).hexdigest()
-        if archive_md5 == pack_info["archive_md5"]:
-            norm_print("OK!")
-            download_archive = False
-        else:
-            norm_print("Verification failed! Redownload...")
-            os.remove(archive_path)
-    if download_archive:
+    if download_pack:
         # download sticker pack
         norm_print("Downloading sticker pack archive... ", end="")
         archive_content = get_sticker_archive(pack_id, sticker_type)
         norm_print("Complete!")
+
         # save archive and unzip to temp folder
-        with open(archive_path, "wb") as f:
+        with open(pack_archive_path, "wb") as f:
             f.write(archive_content)
-        # calculate md5 for future verification
-        archive_md5 = hashlib.md5(archive_content).hexdigest()
-        pack_info["archive_md5"] = archive_md5
 
-    with open(os.path.join(sticker_pack_root, "info.json"), "w", encoding="utf-8") as f:
-        json.dump(pack_info, f, ensure_ascii=False, indent=4)
+    global sticker_process_temp_root
+    sticker_process_temp_root = tempfile.mkdtemp()
+    # starting from here, use return to exit with cleaning up the temp folder
 
-    sticker_raw_path = os.path.join(sticker_pack_root, "raw")
+    sticker_temp_raw_path = os.path.join(sticker_process_temp_root, "raw")
+    sticker_temp_extracted_zip_path = os.path.join(
+        sticker_process_temp_root, "unarchive"
+    )
 
-    if not os.path.isdir(sticker_raw_path):
-        os.mkdir(sticker_raw_path)
+    if not os.path.isdir(sticker_temp_raw_path):
+        os.mkdir(sticker_temp_raw_path)
+    if not os.path.isdir(sticker_temp_extracted_zip_path):
+        os.mkdir(sticker_temp_extracted_zip_path)
 
-        norm_print("Extracting archive... ", end="")
-        with zipfile.ZipFile(archive_path, "r") as zip_ref:
-            zip_ref.extractall(sticker_temp_store_extracted_zip_path)
-        norm_print("Complete!")
+    norm_print("Extracting archive... ", end="")
+    with zipfile.ZipFile(pack_archive_path, "r") as zip_ref:
+        zip_ref.extractall(sticker_temp_extracted_zip_path)
+    norm_print("Complete!")
 
-        # copy useful files to raw folder and rename
-        if is_emoji:
-            # emoji
-            emoji_path = os.path.join(sticker_raw_path, "emoji")
-            if not os.path.isdir(emoji_path):
-                os.mkdir(emoji_path)
-            for fn in os.listdir(sticker_temp_store_extracted_zip_path):
-                if match := re.match(r"(\d+)(_animation)?\.png", fn):
-                    shutil.copy(
-                        os.path.join(sticker_temp_store_extracted_zip_path, fn),
-                        os.path.join(emoji_path, match.group(1) + ".png"),
-                    )
-            # metadata
-            shutil.copy(
-                os.path.join(sticker_temp_store_extracted_zip_path, "meta.json"),
-                os.path.join(sticker_raw_path, "meta.json"),
-            )
-        else:
-            # the static stickers exist in all packs
-            static_path = os.path.join(sticker_raw_path, "static")
-            if not os.path.isdir(static_path):
-                os.mkdir(static_path)
-            for fn in os.listdir(sticker_temp_store_extracted_zip_path):
-                if match := re.match(r"(\d+)@2x\.png", fn):
-                    shutil.copy(
-                        os.path.join(sticker_temp_store_extracted_zip_path, fn),
-                        os.path.join(static_path, match.group(1) + ".png"),
-                    )
-            # animations
-            if os.path.isdir(
-                os.path.join(sticker_temp_store_extracted_zip_path, "animation@2x")
-            ):
-                animation_path = os.path.join(sticker_raw_path, "animation")
-                if not os.path.isdir(animation_path):
-                    os.mkdir(animation_path)
-                for fn in os.listdir(
-                    os.path.join(sticker_temp_store_extracted_zip_path, "animation@2x")
-                ):
-                    if match := re.match(r"(\d+)@2x\.png", fn):
-                        shutil.copy(
-                            os.path.join(
-                                sticker_temp_store_extracted_zip_path,
-                                "animation@2x",
-                                fn,
-                            ),
-                            os.path.join(animation_path, match.group(1) + ".png"),
-                        )
-            # sound
-            if os.path.isdir(
-                os.path.join(sticker_temp_store_extracted_zip_path, "sound")
-            ):
-                sound_path = os.path.join(sticker_raw_path, "sound")
-                if not os.path.isdir(sound_path):
-                    os.mkdir(sound_path)
-                for fn in os.listdir(
-                    os.path.join(sticker_temp_store_extracted_zip_path, "sound")
-                ):
-                    shutil.copy(
-                        os.path.join(
-                            sticker_temp_store_extracted_zip_path, "sound", fn
-                        ),
-                        os.path.join(sound_path, fn),
-                    )
-            # popup
-            if os.path.isdir(
-                os.path.join(sticker_temp_store_extracted_zip_path, "popup")
-            ):
-                popup_path = os.path.join(sticker_raw_path, "popup")
-                if not os.path.isdir(popup_path):
-                    os.mkdir(popup_path)
-                for fn in os.listdir(
-                    os.path.join(sticker_temp_store_extracted_zip_path, "popup")
-                ):
-                    shutil.copy(
-                        os.path.join(
-                            sticker_temp_store_extracted_zip_path, "popup", fn
-                        ),
-                        os.path.join(popup_path, fn),
-                    )
-            # icon
-            shutil.copy(
-                os.path.join(sticker_temp_store_extracted_zip_path, "tab_on@2x.png"),
-                os.path.join(sticker_raw_path, "icon.png"),
-            )
-            # metadata
-            shutil.copy(
-                os.path.join(sticker_temp_store_extracted_zip_path, "productInfo.meta"),
-                os.path.join(sticker_raw_path, "productInfo.meta"),
-            )
-
-        # cleanup temp folder
-        shutil.rmtree(sticker_temp_store_extracted_zip_path)
-    else:
-        norm_print("Sticker pack already exists, skip unarchive...")
+    rearrange_pack_content(
+        sticker_temp_extracted_zip_path, sticker_temp_raw_path, is_emoji
+    )
 
     # for message sticker, download default overlay message in advance
     if sticker_type == StickerType.MESSAGE_STICKER:
-        default_overlay_dl_path = os.path.join(sticker_dl_path, "default_overlay")
+        default_overlay_dl_path = os.path.join(sticker_pack_dl_root, "default_overlay")
         if not os.path.isdir(default_overlay_dl_path):
             os.mkdir(default_overlay_dl_path)
-            norm_print("Downloading default overlay message for message sticker... ")
-            download_queue = Queue()
-            downloader = [MultiThreadDownloader(download_queue) for _ in range(4)]
+        norm_print("Downloading default overlay message for message sticker... ")
+        download_queue = Queue()
+        downloader = [MultiThreadDownloader(download_queue) for _ in range(4)]
 
-            for sticker_id in id_list:
-                filename = os.path.join(default_overlay_dl_path, f"{sticker_id}.png")
-                url = MESSAGE_STICKER_OVERLAY_DEFAULT.format(
-                    sticker_id=sticker_id, pack_id=pack_id
-                )
-                download_queue.put((sticker_id, url, filename))
-            for d in downloader:
-                d.start()
-            wait_for_queue_with_progress(quiet, download_queue, sticker_count)
-
-            norm_print("Message sticker default overlay download done!")
-        else:
-            norm_print(
-                "Message sticker default overlay already exists, skip download..."
+        for sticker_id in id_list:
+            filename = os.path.join(default_overlay_dl_path, f"{sticker_id}.png")
+            url = MESSAGE_STICKER_OVERLAY_DEFAULT.format(
+                sticker_id=sticker_id, pack_id=pack_id
             )
-        # copy default overlay to sticker pack folder
+            download_queue.put((sticker_id, url, filename))
+        for d in downloader:
+            d.start()
+        wait_for_queue_with_progress(quiet, download_queue, sticker_count)
+
+        norm_print("Message sticker default overlay download done!")
+
+        # copy default overlay to raw folder
         shutil.copytree(
             default_overlay_dl_path,
-            os.path.join(sticker_raw_path, "default_overlay"),
+            os.path.join(sticker_temp_raw_path, "default_overlay"),
             dirs_exist_ok=True,
         )
-    if output_fmt == "none":
-        norm_print("No processing will be done, exit...")
-        if open_folder:
-            os.startfile(sticker_pack_root)
-        sys.exit(0)
-
-    # check dependency for processing
-    if not shutil.which("magick"):
-        err_print(
-            "Error: ImageMagick is missing. Please install missing dependencies are re-run the program"
-        )
-        sys.exit(1)
 
     # determine process option
     # for line, all stickers are png/apng
@@ -513,12 +369,15 @@ def main():
         output_format = OutputFormat.WEBM
     elif output_fmt == "video":
         output_format = OutputFormat.MP4
+    elif output_fmt == "none":
+        output_format = OutputFormat.RAW
 
     else:
+        # that should not happen since we have checked the input in argparse
         err_print(f"FAILED: Invalid output format {output_fmt}!")
-        sys.exit(1)
+        return
 
-    process_queue = Queue()
+    sanitized_title = "_".join(re.sub(r'[/:*?"<>|]', "", title).split())
     if no_sub_dir:
         sticker_output_path = os.path.join(
             default_sticker_output_root_dir, f"{sanitized_title}({pack_id})"
@@ -529,6 +388,27 @@ def main():
             f"{sanitized_title}({pack_id})",
             f"{output_format.value}",
         )
+
+    if output_format == OutputFormat.RAW:
+        norm_print("Copying raw sticker files to output folder... ", end="")
+        shutil.copytree(
+            sticker_temp_raw_path,
+            sticker_output_path,
+            dirs_exist_ok=True,
+        )
+        if open_folder:
+            os.startfile(sticker_output_path)
+        return
+
+    # check dependency for processing
+    if not shutil.which("magick"):
+        err_print(
+            "Error: ImageMagick is missing. Please install missing dependencies are re-run the program"
+        )
+        return
+
+    process_queue = Queue()
+
     if scale_px:
         sticker_output_path += f"_scale_{scale_px}"
     if not os.path.isdir(sticker_output_path):
@@ -538,7 +418,7 @@ def main():
         err_print(
             "ERROR: Sticker pack does not have animation, only PNG and GIF output are supported!"
         )
-        sys.exit(1)
+        return
 
     for sticker_id in id_list:
         sub_folder = "static"
@@ -550,10 +430,10 @@ def main():
             if has_popup:
                 sub_folder = "popup"
 
-        in_pic = os.path.join(sticker_raw_path, sub_folder, f"{sticker_id}.png")
-        in_audio = os.path.join(sticker_raw_path, "sound", f"{sticker_id}.m4a")
+        in_pic = os.path.join(sticker_temp_raw_path, sub_folder, f"{sticker_id}.png")
+        in_audio = os.path.join(sticker_temp_raw_path, "sound", f"{sticker_id}.m4a")
         in_overlay = os.path.join(
-            sticker_raw_path, "default_overlay", f"{sticker_id}.png"
+            sticker_temp_raw_path, "default_overlay", f"{sticker_id}.png"
         )
 
         result_output = os.path.join(
@@ -567,7 +447,7 @@ def main():
             operations.append(Operation.OVERLAY)
         if scale_px:
             operations.append(Operation.SCALE)
-        if if_remove_alpha:
+        if remove_alpha:
             operations.append(Operation.REMOVE_ALPHA)
 
         if output_format == OutputFormat.GIF:
@@ -597,18 +477,132 @@ def main():
     ]
     for p in processor:
         p.start()
+    print("Processing stickers...")
     wait_for_queue_with_progress(quiet, process_queue, sticker_count)
 
     # TODO icon for all sticker packs
 
     norm_print("Process done! Cleaning up...")
 
-    # remove temp dir
-    shutil.rmtree(sticker_process_temp_root)
     # os.startfile(sticker_process_temp_root)
     if open_folder:
         os.startfile(sticker_output_path)
 
 
+def rearrange_pack_content(sticker_extracted_zip_path, sticker_raw_path, is_emoji):
+    # copy useful files to raw folder and rename
+    if is_emoji:
+        # emoji
+        emoji_path = os.path.join(sticker_raw_path, "emoji")
+        if not os.path.isdir(emoji_path):
+            os.mkdir(emoji_path)
+        for fn in os.listdir(sticker_extracted_zip_path):
+            if match := re.match(r"(\d+)(_animation)?\.png", fn):
+                shutil.copy(
+                    os.path.join(sticker_extracted_zip_path, fn),
+                    os.path.join(emoji_path, match.group(1) + ".png"),
+                )
+        # metadata
+        shutil.copy(
+            os.path.join(sticker_extracted_zip_path, "meta.json"),
+            os.path.join(sticker_raw_path, "meta.json"),
+        )
+    else:
+        # the static stickers exist in all packs
+        static_path = os.path.join(sticker_raw_path, "static")
+        if not os.path.isdir(static_path):
+            os.mkdir(static_path)
+        for fn in os.listdir(sticker_extracted_zip_path):
+            if match := re.match(r"(\d+)@2x\.png", fn):
+                shutil.copy(
+                    os.path.join(sticker_extracted_zip_path, fn),
+                    os.path.join(static_path, match.group(1) + ".png"),
+                )
+        # animations
+        if os.path.isdir(os.path.join(sticker_extracted_zip_path, "animation@2x")):
+            animation_path = os.path.join(sticker_raw_path, "animation")
+            if not os.path.isdir(animation_path):
+                os.mkdir(animation_path)
+            for fn in os.listdir(
+                os.path.join(sticker_extracted_zip_path, "animation@2x")
+            ):
+                if match := re.match(r"(\d+)@2x\.png", fn):
+                    shutil.copy(
+                        os.path.join(
+                            sticker_extracted_zip_path,
+                            "animation@2x",
+                            fn,
+                        ),
+                        os.path.join(animation_path, match.group(1) + ".png"),
+                    )
+        # sound
+        if os.path.isdir(os.path.join(sticker_extracted_zip_path, "sound")):
+            sound_path = os.path.join(sticker_raw_path, "sound")
+            if not os.path.isdir(sound_path):
+                os.mkdir(sound_path)
+            for fn in os.listdir(os.path.join(sticker_extracted_zip_path, "sound")):
+                shutil.copy(
+                    os.path.join(sticker_extracted_zip_path, "sound", fn),
+                    os.path.join(sound_path, fn),
+                )
+        # popup
+        if os.path.isdir(os.path.join(sticker_extracted_zip_path, "popup")):
+            popup_path = os.path.join(sticker_raw_path, "popup")
+            if not os.path.isdir(popup_path):
+                os.mkdir(popup_path)
+            for fn in os.listdir(os.path.join(sticker_extracted_zip_path, "popup")):
+                shutil.copy(
+                    os.path.join(sticker_extracted_zip_path, "popup", fn),
+                    os.path.join(popup_path, fn),
+                )
+        # icon
+        shutil.copy(
+            os.path.join(sticker_extracted_zip_path, "tab_on@2x.png"),
+            os.path.join(sticker_raw_path, "icon.png"),
+        )
+        # metadata
+        shutil.copy(
+            os.path.join(sticker_extracted_zip_path, "productInfo.meta"),
+            os.path.join(sticker_raw_path, "productInfo.meta"),
+        )
+
+
+def extract_pack_info_from_metadata(metadata, pack_id, lang, is_emoji):
+    lang_used = lang
+    if metadata["title"].get(lang):
+        title = metadata["title"][lang]
+        author_name = metadata["author"][lang]
+    else:
+        # en should always be available
+        title = metadata["title"]["en"]
+        author_name = metadata["author"]["en"]
+        lang_used = "en"
+    if is_emoji:
+        if metadata.get("sticonResourceType") == "ANIMATION":
+            sticker_type = StickerType.ANIMATED_EMOJI
+        else:
+            sticker_type = StickerType.EMOJI
+        id_list = metadata["orders"]
+    else:
+        if "stickerResourceType" not in metadata:
+            sticker_type = StickerType.STATIC_STICKER
+        else:
+            sticker_type = StickerType(metadata["stickerResourceType"])
+        id_list = [i["id"] for i in metadata["stickers"]]
+    pack_info = {
+        "title": title,
+        "author_name": author_name,
+        "lang_used": lang_used,
+        "pack_id": pack_id,
+        "sticker_type": sticker_type.value,
+        "count": len(id_list),
+        "stickers": id_list,
+    }
+    return pack_info
+
+
 if __name__ == "__main__":
     main()
+    # do cleanup
+    # remove temp dir
+    shutil.rmtree(sticker_process_temp_root)

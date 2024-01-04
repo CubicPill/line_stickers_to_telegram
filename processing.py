@@ -11,7 +11,7 @@ import ffmpeg
 
 from utils import StickerType, increase_counter, sticker_type_properties
 
-GIF_ALPHA_THRESHOLD = 1
+DEFAULT_GIF_ALPHA_THRESHOLD = 1
 WEBM_SIZE_KB_MAX = 256
 WEBM_DURATION_SEC_MAX = 3
 
@@ -25,6 +25,7 @@ class OutputFormat(Enum):
     WEBM = "webm"
     MP4 = "mp4"
     APNG = "png"
+    RAW = "raw"
 
 
 class Operation(Enum):
@@ -296,7 +297,7 @@ class ImageProcessorThread(Thread):
                 ]
             )
 
-    def to_gif(self, in_file, out_file):
+    def to_gif(self, in_file, out_file, alpha_threshold=DEFAULT_GIF_ALPHA_THRESHOLD):
         if self._sticker_has_animation:
             f = "apng"
         else:
@@ -307,7 +308,7 @@ class ImageProcessorThread(Thread):
         ffmpeg.filter(
             [ffmpeg.input(in_file, f=f), palette_stream],
             "paletteuse",
-            alpha_threshold=GIF_ALPHA_THRESHOLD,
+            alpha_threshold=alpha_threshold,
         ).output(out_file, f="gif").overwrite_output().run(quiet=True)
         # issue with tencent qq/tim
         subprocess.call(["magick", out_file, "-coalesce", out_file])
