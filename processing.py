@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import datetime
 import os.path
 import queue
@@ -57,15 +59,28 @@ class ProcessTask:
         self.result_path = result_output_path
 
 
-class ImageProcessorThread(Thread):
+class ProcessorConfig:
     def __init__(
-        self, queue, temp_dir, sticker_type: StickerType, output_format: OutputFormat
+        self,
+        temp_dir,
+        sticker_type: StickerType,
+        output_format: OutputFormat,
+        extra_params: dict | None = None,
     ):
-        Thread.__init__(self, name="ImageProcessorThread")
-        self.queue = queue
         self.temp_dir = temp_dir
         self.sticker_type = sticker_type
         self.output_format = output_format
+        self.extra_params = extra_params
+
+
+class ImageProcessorThread(Thread):
+    def __init__(self, task_queue, config: ProcessorConfig):
+        Thread.__init__(self, name="ImageProcessorThread")
+        self.queue = task_queue
+        self.temp_dir = config.temp_dir
+        self.sticker_type = config.sticker_type
+        self.output_format = config.output_format
+        self.extra_params = config.extra_params
         self._current_sticker_id = None
         (
             self._sticker_has_animation,
@@ -95,7 +110,14 @@ class ImageProcessorThread(Thread):
                     elif op == Operation.REMOVE_ALPHA:
                         self.remove_alpha(curr_in, curr_out)
                     elif op == Operation.TO_GIF:
-                        self.to_gif(curr_in, curr_out)
+                        alpha_threshold = DEFAULT_GIF_ALPHA_THRESHOLD
+                        if self.extra_params.get("GAT"):
+                            try:
+                                alpha_threshold = int(self.extra_params["GAT"])
+                            except ValueError:
+                                pass
+
+                        self.to_gif(curr_in, curr_out, alpha_threshold)
                     elif op == Operation.TO_WEBM:
                         frame_dir = self.make_frame_temp_dir()
                         self.split_apng_frames(curr_in, frame_dir)
@@ -297,7 +319,7 @@ class ImageProcessorThread(Thread):
                 ]
             )
 
-    def to_gif(self, in_file, out_file, alpha_threshold=DEFAULT_GIF_ALPHA_THRESHOLD):
+    def to_gif(self, in_file, out_file, alpha_threshold):
         if self._sticker_has_animation:
             f = "apng"
         else:

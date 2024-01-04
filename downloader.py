@@ -12,7 +12,13 @@ from queue import Queue
 from tqdm import tqdm
 
 import webreq
-from processing import ImageProcessorThread, Operation, OutputFormat, ProcessTask
+from processing import (
+    ImageProcessorThread,
+    Operation,
+    OutputFormat,
+    ProcessTask,
+    ProcessorConfig,
+)
 from utils import (
     MESSAGE_STICKER_OVERLAY_DEFAULT,
     PackNotFoundException,
@@ -32,23 +38,23 @@ from webreq import (
 
 err_print = print
 norm_print = print
-sticker_process_temp_root = None
+sticker_process_temp_root = ""
 
 
 def wait_for_queue_with_progress(quiet: bool, queue: Queue, total: int):
     if not quiet:
         reset_counter()
-        with tqdm(total=total) as bar:
+        with tqdm(total=total) as progress_bar:
             last = 0
             while not (completed := get_counter_value()) == total:
-                bar.update(completed - last)
-                bar.refresh()
+                progress_bar.update(completed - last)
+                progress_bar.refresh()
                 last = completed
                 time.sleep(0.5)
             queue.join()
-            bar.n = total
-            bar.refresh()
-            bar.clear()
+            progress_bar.n = total
+            progress_bar.refresh()
+            progress_bar.clear()
     else:
         queue.join()
 
@@ -136,6 +142,12 @@ def main():
         help="Replace transparent background with white",
         action="store_true",
     )
+    # some extra parameters for processing
+    # for example, alpha threshold for gif
+    # K1=V1,K2=V2,...
+    arg_parser.add_argument(
+        "--extra-params", type=str, help="Extra parameters for processing"
+    )
 
     # for message stickers only
     arg_parser.add_argument(
@@ -164,7 +176,7 @@ def main():
     # handle proxies
     proxies = {}
     if os.path.exists("./PROXY"):
-        with open("./PROXY") as f:
+        with open("./PROXY",encoding='utf-8') as f:
             proxies["https"] = f.read().strip()
     if args.proxy:
         # proxy in args will override the PROXY file
@@ -184,16 +196,25 @@ def main():
     no_sub_dir = args.no_subdir
     open_folder = args.show
     quiet = args.quiet
+    extra_params = {}
+    if args.extra_params:
+        for kv in args.extra_params.split(","):
+            try:
+                k, v = kv.split("=")
+            except ValueError:
+                err_print(f"Invalid extra parameter {kv}, ignored")
+                continue
+            extra_params[k] = v
     if not args.output_dir:
-        default_sticker_output_root_dir = os.path.join(os.getcwd(), "sticker_out")
+        sticker_output_root_dir = os.path.join(os.getcwd(), "sticker_out")
     else:
-        default_sticker_output_root_dir = args.output_dir
+        sticker_output_root_dir = args.output_dir
     global norm_print
     if quiet:
         norm_print = lambda *args, **kwargs: None
         skip_confirmation = True
-    if not os.path.exists(default_sticker_output_root_dir):
-        os.mkdir(default_sticker_output_root_dir)
+    if not os.path.exists(sticker_output_root_dir):
+        os.makedirs(sticker_output_root_dir)
     # check if input is id or url
     if "http" not in id_url:
         pack_id = id_url
@@ -281,7 +302,7 @@ def main():
             norm_print("Scale:", f"{scale_px}*{scale_px}px")
         if sticker_type == StickerType.MESSAGE_STICKER:
             norm_print("Default text overlay:", not no_default_txt_overlay)
-            norm_print("Output directory:", default_sticker_output_root_dir)
+            norm_print("Output directory:", sticker_output_root_dir)
 
     norm_print("----------------------------------------------------")
 
@@ -380,11 +401,11 @@ def main():
     sanitized_title = "_".join(re.sub(r'[/:*?"<>|]', "", title).split())
     if no_sub_dir:
         sticker_output_path = os.path.join(
-            default_sticker_output_root_dir, f"{sanitized_title}({pack_id})"
+            sticker_output_root_dir, f"{sanitized_title}({pack_id})"
         )
     else:
         sticker_output_path = os.path.join(
-            default_sticker_output_root_dir,
+            sticker_output_root_dir,
             f"{sanitized_title}({pack_id})",
             f"{output_format.value}",
         )
@@ -468,13 +489,10 @@ def main():
                 result_output,
             )
         )
-
-    processor = [
-        ImageProcessorThread(
-            process_queue, sticker_process_temp_root, sticker_type, output_format
-        )
-        for _ in range(thread_num)
-    ]
+    config = ProcessorConfig(
+        sticker_process_temp_root, sticker_type, output_format, extra_params
+    )
+    processor = [ImageProcessorThread(process_queue, config) for _ in range(thread_num)]
     for p in processor:
         p.start()
     print("Processing stickers...")
@@ -568,15 +586,14 @@ def rearrange_pack_content(sticker_extracted_zip_path, sticker_raw_path, is_emoj
 
 
 def extract_pack_info_from_metadata(metadata, pack_id, lang, is_emoji):
-    lang_used = lang
     if metadata["title"].get(lang):
         title = metadata["title"][lang]
+    else:
+        title = metadata["title"]["en"]
+    if metadata["author"].get(lang):
         author_name = metadata["author"][lang]
     else:
-        # en should always be available
-        title = metadata["title"]["en"]
         author_name = metadata["author"]["en"]
-        lang_used = "en"
     if is_emoji:
         if metadata.get("sticonResourceType") == "ANIMATION":
             sticker_type = StickerType.ANIMATED_EMOJI
@@ -592,7 +609,6 @@ def extract_pack_info_from_metadata(metadata, pack_id, lang, is_emoji):
     pack_info = {
         "title": title,
         "author_name": author_name,
-        "lang_used": lang_used,
         "pack_id": pack_id,
         "sticker_type": sticker_type.value,
         "count": len(id_list),
@@ -605,4 +621,5 @@ if __name__ == "__main__":
     main()
     # do cleanup
     # remove temp dir
-    shutil.rmtree(sticker_process_temp_root)
+    if sticker_process_temp_root:
+        shutil.rmtree(sticker_process_temp_root)
