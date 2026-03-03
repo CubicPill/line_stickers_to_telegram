@@ -16,6 +16,7 @@ from utils import StickerType, increase_counter, sticker_type_properties
 DEFAULT_GIF_ALPHA_THRESHOLD = 1
 WEBM_SIZE_KB_MAX = 256
 WEBM_DURATION_SEC_MAX = 3
+WEBM_FRAMERATE = 30
 
 _MAGICK_BIN = shutil.which("magick")
 _print_lock = Lock()
@@ -231,7 +232,7 @@ class ImageProcessorThread(Thread):
         frame_file_path = self._make_frame_file(durations, frame_dir)
 
         ffmpeg.input(frame_file_path, format="concat").output(
-            out_file, r=30, fps_mode="cfr", f="webm"
+            out_file, r=WEBM_FRAMERATE, fps_mode="cfr", f="webm"
         ).overwrite_output().run(quiet=False)
 
     def get_animation_delays(self, in_apng):

@@ -32,30 +32,41 @@ Install all requirements and make sure the executables are in your `PATH`.
 
 
 ## Usage
-```
-download.py [-h] [--source SOURCE] [--lang LANG] [--proxy PROXY] [--no-scale] [--static] [--to-gif] [--to-webm] [--to-video] [-p PATH] [-t THREADS] id
-```
 
-```
+```text
+usage: downloader.py [-h] [--type {sticker,emoji}] [--lang {zh-Hant,en,ja,ko,th,id,pt-BR}] [--proxy PROXY] [-y] [--redownload] [--no-subdir] [--show] [-q] [-o OUTPUT_DIR]
+                     [--output-fmt {none,png,gif,webm,mp4}] [--scale] [--remove-alpha] [--extra-params EXTRA_PARAMS] [--no-default-txt-overlay] [-t THREADS]
+                     id_url
+
 Download stickers from line store
 
 positional arguments:
-  id                    Product id of sticker set
+  id_url                Product id of sticker set or the URL (yabe, line)
 
-optional arguments:
+options:
   -h, --help            show this help message and exit
-  --source SOURCE       Source to get sticker set information. Default is "line"
-  --lang LANG           Language(Zone) to get sticker. Could be "en", "ja", "zh-Hant" and others. Default is "en"
-  --proxy PROXY         HTTPS proxy, addr:port
-  --no-scale            Disable static stickers auto resizing to 512*512
-  --static              Download only static images (Will preserve APNG). Will override all other conversion options
-  --to-gif              Convert animated PNG (.apng) to GIF, no scaling
-  --to-webm             Convert animated PNG (.apng) to WEBM, to be used in telegram video stickers, will scale to 512*(<512)
-  --to-video            Convert sticker (static/animated/popup) to .mp4 video, with audio (if available). No scaling. Static stickers without audio cannot be
-                        converted to video
-  -p PATH, --path PATH  Path to download the stickers
-  -t THREADS, --threads THREADS
-                        Thread number of downloader, default 4
+  --type {sticker,emoji}
+                        Specify the type of the pack
+  --lang {zh-Hant,en,ja,ko,th,id,pt-BR}
+                        Language used when accessing Line page.
+  --proxy PROXY         proxy, http(s)://addr:port
+  -y                    Skip confirmation
+  --redownload          Redownload stickers even if they exist
+  --no-subdir           Do not create subdirectory for different output formats
+  --show                Open the download/output directory after download
+  -q, --quiet           Do not print information and progress bar
+  -o, --output-dir OUTPUT_DIR
+                        Output directory for processed stickers
+  --output-fmt {none,png,gif,webm,mp4}
+                        Output format
+  --scale               Scale static stickers to 512*512, preserving aspect ratio
+  --remove-alpha        Replace transparent background with white
+  --extra-params EXTRA_PARAMS
+                        Extra parameters for processing
+  --no-default-txt-overlay
+                        Do not put default text overlay on message stickers
+  -t, --threads THREADS
+                        Thread number of processing threads
 ```
 Examples:
 
@@ -85,6 +96,37 @@ The original APNG images comes with Alpha channel and typically has a transparen
 2. Calculate the color of each pixel, using white as background color.
 
 Method 1 is ~2.5x faster than method 2. But it cannot handle cases with `ya8` pixel format (Comes with Gray and Alpha channels, as I observed). So if the pixel format is `ya8`, method 2 will be used.
+
+### Concatenate Stickers
+
+A script `concat_stickers.py` is provided to stitch multiple stickers from a pack into a single image sheet.
+
+**Usage:**
+
+```
+python concat_stickers.py <sticker_id> [--rows <num>] [--cols <num>] [-o <output_file>]
+```
+
+**Arguments:**
+
+- `sticker_id`: The ID of the sticker pack (must be downloaded first).
+- `--rows`: Number of rows in the sticker sheet (default: 5).
+- `--cols`: Number of columns in the sticker sheet (default: 5).
+- `-o, --output`: Path for the output file. Use `.png` for static sheets and `.gif` for animated sheets.
+
+**Example:**
+
+```
+python concat_stickers.py 10023 --rows 4 --cols 4 -o 10023_sheet.png
+```
+
+This will create a 4x4 PNG sticker sheet from the static sticker pack `10023`.
+
+```
+python concat_stickers.py 10154 --rows 6 --cols 5 -o 10154_sheet.gif
+```
+
+This will create a 6x5 animated GIF sticker sheet from the animated sticker pack `10154`.
 
 ## Known issues
 - FFmpeg (I'm using v5.0) may not correctly handle frame disposal in APNG sometimes. 
